@@ -169,7 +169,6 @@ pub fn build_ffmpeg_linux(nvenc_flag: bool, deps_path: &Path) {
         "--enable-encoder=av1_vaapi",
         "--enable-hwaccel=h264_vaapi",
         "--enable-hwaccel=hevc_vaapi",
-        "--enable-hwaccel=av1_vaapi",
         "--enable-filter=scale_vaapi",
         "--enable-vulkan",
         "--enable-libdrm",
