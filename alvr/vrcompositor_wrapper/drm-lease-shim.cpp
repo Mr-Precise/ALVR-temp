@@ -7,8 +7,8 @@
 #include <xf86drmMode.h>
 #include <xf86drm.h>
 
-#include <fstream>
-#include <filesystem>
+#include </usr/include/c++/10/fstream>
+#include </usr/include/c++/10/filesystem>
 
 #define PICOJSON_USE_INT64
 #include "../server/cpp/alvr_server/include/picojson.h"
