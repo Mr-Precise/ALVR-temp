@@ -23,7 +23,7 @@ jobs:
       - uses: Swatinem/rust-cache@v1
 
       - name: Add Lunarg repository key
-        run: sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys B2E3E94BC3CBBAB3
+        run: wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
 
       - name: Add Lunarg repository
         run: sudo sh -c 'echo "deb http://packages.lunarg.com/vulkan focal main" > /etc/apt/sources.list.d/lunarg-vulkan-focal.list'
