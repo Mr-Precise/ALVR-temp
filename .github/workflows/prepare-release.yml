@@ -91,12 +91,12 @@ jobs:
           cp alvr/xtask/deb/cuda.pc /usr/share/pkgconfig
           cargo xtask prepare-deps --platform linux
 
-      - name: Set GCC-10 as default
-        run: |
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
-          sudo update-alternatives --config gcc
-          sudo update-alternatives --config g++
+      # - name: Set GCC-10 as default
+      #   run: |
+      #     sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+      #     sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+      #     sudo update-alternatives --config gcc
+      #     sudo update-alternatives --config g++
 
       - name: Build and package ALVR (.tar.gz)
         id: build
