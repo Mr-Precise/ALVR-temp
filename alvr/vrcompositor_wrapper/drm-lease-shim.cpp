@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <xf86drmMode.h>
+#include <xf86drm.h>
 
 #include <fstream>
 #include <filesystem>
@@ -67,7 +68,7 @@ static void open_drm_fd()
 {
     static drmModeResPtr (*real_drmModeGetResources)(int fd) = nullptr;
     LOAD_FN(drmModeGetResources);
-    for(auto cardCandidate : std::filesystem::directory_iterator("/dev/dri")) {
+    for(auto cardCandidate : std::filesystem::directory_iterator(std::filesystem::path("/dev/dri"))) {
         if(cardCandidate.path().filename().string().rfind("card", 0) == 0) {
             LOG("cardCandidateFound: file=%s", cardCandidate.path().c_str());
             drm_fd = open(cardCandidate.path().c_str(), O_RDONLY);
