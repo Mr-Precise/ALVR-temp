@@ -12,95 +12,8 @@ on:
         default: ""
 
 jobs:
-  prepare_release:
-    runs-on: windows-2019
-    outputs:
-      release_ref: ${{ steps.output_ref.outputs.release_ref }}
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
-    steps:
-      - name: Configure git
-        run: git config --global core.autocrlf false
-
-      - uses: actions/checkout@v2
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Bump version
-        id: bump_version
-        env:
-          RUST_BACKTRACE: 1
-        run: |
-          $versionarg = "${{ github.event.inputs.version }}"
-          $versionarg = If ($versionarg.Length -gt 0) { "--version $versionarg" } else { "" }
-          $out = cargo xtask bump $versionarg.split()
-          echo $out
-          cargo update -p alvr_common
-          echo "::set-output name=version_tag::$(echo $out | sls -CaseSensitive -Pattern '^v.*$')"
-
-      - name: Push changes
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "[Auto] Bump version"
-
-      - name: Output ref for later checkouts
-        id: output_ref
-        run: echo "::set-output name=release_ref::$(git rev-parse HEAD)"
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.bump_version.outputs.version_tag }}
-          release_name: ALVR ${{ steps.bump_version.outputs.version_tag }}
-          draft: true
-          prerelease: false
-          commitish: ${{ steps.output_ref.outputs.release_ref }}
-
-  build_windows_streamer:
-    runs-on: windows-2019
-    needs: [prepare_release]
-    env:
-      # For bindgen to find libclang.dll, we need to give it the path to the Visual Studio package.
-      # This is specific to the GitHub windows-2019 runner.
-      LIBCLANG_PATH: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\Llvm\x64\bin'
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ needs.prepare_release.outputs.release_ref }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - uses: crazy-max/ghaction-chocolatey@v1
-        with:
-          args: install zip unzip pkgconfiglite wixtoolset
-
-      - name: Build and package ALVR
-        id: build
-        env:
-          RUST_BACKTRACE: 1
-        run: |
-          cargo xtask prepare-deps --platform windows --ci
-          cargo xtask package-streamer --gpl
-
-      - name: Upload portable streamer for Windows
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare_release.outputs.upload_url }}
-          asset_path: ./build/alvr_streamer_windows.zip
-          asset_name: alvr_streamer_windows.zip
-          asset_content_type: application/zip
-
   build_linux_streamer:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [prepare_release]
     steps:
       - uses: actions/checkout@v2
@@ -137,7 +50,7 @@ jobs:
           asset_content_type: application/gzip
 
   build_flatpak_bundle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [prepare_release]
     steps:
       - uses: actions/checkout@v2
