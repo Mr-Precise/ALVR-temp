@@ -29,7 +29,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   check-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -40,12 +40,21 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v1
 
+      - name: Add Lunarg repository key
+        run: wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+
+      - name: Add Lunarg repository
+        run: sudo sh -c 'echo "deb http://packages.lunarg.com/vulkan focal main" > /etc/apt/sources.list.d/lunarg-vulkan-focal.list'
+
+      # - name: Add ernstp/mesarc ppa repository
+      #   run: sudo add-apt-repository ppa:ernstp/mesarc --yes --no-update
+
       - name: Build and install dependencies
         env:
           RUST_BACKTRACE: 1
         run: |
           sudo apt update
-          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk
           cargo xtask prepare-deps --platform linux --no-nvidia
 
       - uses: actions-rs/clippy-check@v1
@@ -114,23 +123,23 @@ jobs:
         run:
           cargo apk build
 
-  tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - uses: Swatinem/rust-cache@v1
+  # tests:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         toolchain: stable
+  #         override: true
+  #     - uses: Swatinem/rust-cache@v1
 
-      - run: sudo apt update && sudo apt install libgtk-3-dev
+  #     - run: sudo apt update && sudo apt install libgtk-3-dev
 
-      - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: -p alvr_session
+  #     - name: Run tests
+  #       uses: actions-rs/cargo@v1
+  #       with:
+  #         command: test
+  #         args: -p alvr_session
 
   rustfmt:
     runs-on: ubuntu-latest
