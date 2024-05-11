@@ -110,7 +110,7 @@ pub fn build_x264_linux(deps_path: &Path) {
 
     // x264 0.164
     command::download_and_extract_tar(
-        "https://code.videolan.org/videolan/x264/-/archive/c196240409e4d7c01b47448d93b1f9683aaa7cf7/x264-c196240409e4d7c01b47448d93b1f9683aaa7cf7.tar.bz2",
+        "https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.bz2",
         deps_path,
     )
     .unwrap();
@@ -118,7 +118,7 @@ pub fn build_x264_linux(deps_path: &Path) {
     let final_path = deps_path.join("x264");
 
     fs::rename(
-        deps_path.join("x264-c196240409e4d7c01b47448d93b1f9683aaa7cf7"),
+        deps_path.join("x264-master"),
         &final_path,
     )
     .unwrap();
@@ -164,7 +164,6 @@ pub fn build_ffmpeg_linux(nvenc_flag: bool, deps_path: &Path) {
         "--disable-postproc",
         "--disable-network",
         "--disable-everything",
-        "--disable-encoders",
         "--enable-encoder=h264_vaapi",
         "--enable-encoder=hevc_vaapi",
         "--enable-hwaccel=h264_vaapi",
@@ -174,7 +173,6 @@ pub fn build_ffmpeg_linux(nvenc_flag: bool, deps_path: &Path) {
         "--enable-libdrm",
         "--enable-pic",
         "--enable-rpath",
-        "--fatal-warnings",
     ];
     let install_prefix = format!("--prefix={}", final_path.join("alvr_build").display());
     // The reason for 4x$ in LDSOFLAGS var refer to https://stackoverflow.com/a/71429999
