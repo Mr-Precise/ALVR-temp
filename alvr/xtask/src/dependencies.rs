@@ -164,6 +164,7 @@ pub fn build_ffmpeg_linux(nvenc_flag: bool, deps_path: &Path) {
         "--disable-postproc",
         "--disable-network",
         "--disable-everything",
+        "--disable-encoders",
         "--enable-encoder=h264_vaapi",
         "--enable-encoder=hevc_vaapi",
         "--enable-hwaccel=h264_vaapi",
