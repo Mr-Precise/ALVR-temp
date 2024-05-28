@@ -41,7 +41,7 @@ use alvr_audio as audio;
 const INITIAL_MESSAGE: &str = concat!(
     "Searching for streamer...\n",
     "Open ALVR on your PC then click \"Trust\"\n",
-    "next to the client entry",
+    "next to the device entry",
 );
 const NETWORK_UNREACHABLE_MESSAGE: &str = "Cannot connect to the streamer.\nNetwork error.";
 const SUCCESS_CONNECT_MESSAGE: &str = "Successful connection!\nPlease wait...";
@@ -463,7 +463,7 @@ fn connection_pipeline(
                     let (gauge_value, is_plugged) = platform::get_battery_status();
                     if let Some(sender) = &mut *ctx.control_sender.lock() {
                         sender
-                            .send(&ClientControlPacket::Battery(crate::BatteryPacket {
+                            .send(&ClientControlPacket::Battery(crate::BatteryInfo {
                                 device_id: *alvr_common::HEAD_ID,
                                 gauge_value,
                                 is_plugged,
