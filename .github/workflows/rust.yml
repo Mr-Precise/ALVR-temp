@@ -10,6 +10,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check-windows:
+    runs-on: windows-2019
+    env:
+      LIBCLANG_PATH: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\Llvm\x64\bin'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: clippy
+      - uses: Swatinem/rust-cache@v1
+
+      - run: cargo xtask prepare-deps --platform windows
+
+      - uses: ErichDonGubler/clippy-check@fix-windows-lf-breaking-reports
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   check-linux:
     runs-on: ubuntu-20.04
     steps:
@@ -36,20 +56,31 @@ jobs:
           RUST_BACKTRACE: 1
         run: |
           sudo apt update
-          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk gcc-10 g++-10
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk
           cargo xtask prepare-deps --platform linux --no-nvidia
-
-      # - name: Set GCC-10 as default
-      #   run: |
-      #     sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
-      #     sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
-      #     sudo update-alternatives --config gcc
-      #     sudo update-alternatives --config g++
 
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --features gpl
+
+  check-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: clippy
+      - uses: Swatinem/rust-cache@v1
+
+      - run: cargo xtask prepare-deps --platform macos
+
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
     runs-on: ubuntu-latest
@@ -88,6 +119,7 @@ jobs:
         # Create folder without content to make the build succeed
       - run: |
           mkdir -p deps/android_openxr/arm64-v8a
+          cargo xtask prepare-deps --platform android
 
       - name: Build client
         env:
@@ -96,26 +128,38 @@ jobs:
         run:
           cargo apk build
 
-  # tests:
-  #   runs-on: ubuntu-20.04
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         toolchain: stable
-  #         override: true
-  #     - uses: Swatinem/rust-cache@v1
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v1
 
-  #     - run: sudo apt update && sudo apt install libgtk-3-dev
+      - name: Add Lunarg repository key
+        run: wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
 
-  #     - name: Run tests
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: test
-  #         args: -p alvr_session
+      - name: Add Lunarg repository
+        run: sudo sh -c 'echo "deb http://packages.lunarg.com/vulkan focal main" > /etc/apt/sources.list.d/lunarg-vulkan-focal.list'
 
-  rustfmt:
-    runs-on: ubuntu-20.04
+      - name: Build and install dependencies
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          sudo apt update
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk
+          cargo xtask prepare-deps --platform linux --no-nvidia
+
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -p alvr_session
+
+  check-msrv-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

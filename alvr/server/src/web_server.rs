@@ -1,13 +1,13 @@
 use crate::{
-    bindings::FfiButtonValue, connection::CLIENTS_TO_BE_REMOVED, DECODER_CONFIG, FILESYSTEM_LAYOUT,
-    SERVER_DATA_MANAGER, STATISTICS_MANAGER, VIDEO_MIRROR_SENDER, VIDEO_RECORDING_FILE,
+    logging_backend::LOGGING_EVENTS_SENDER, ConnectionContext, ServerCoreEvent, FILESYSTEM_LAYOUT,
+    SERVER_DATA_MANAGER,
 };
 use alvr_common::{
     anyhow::{self, Result},
     error, info, log, warn, ConnectionState,
 };
-use alvr_events::{ButtonEvent, Event, EventType};
-use alvr_packets::{ButtonValue, ClientListAction, ServerRequest};
+use alvr_events::{ButtonEvent, EventType};
+use alvr_packets::{ButtonEntry, ClientListAction, ServerRequest};
 use bytes::Buf;
 use futures::SinkExt;
 use headers::HeaderMapExt;
@@ -17,7 +17,7 @@ use hyper::{
 };
 use serde::de::DeserializeOwned;
 use serde_json as json;
-use std::{net::SocketAddr, thread};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_tungstenite::{tungstenite::protocol, WebSocketStream};
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -88,8 +88,8 @@ async fn websocket<T: Clone + Send + 'static>(
 }
 
 async fn http_api(
+    connection_context: &ConnectionContext,
     request: Request<Body>,
-    events_sender: broadcast::Sender<Event>,
 ) -> Result<Response<Body>> {
     let mut response = match request.uri().path() {
         // New unified requests
@@ -119,7 +119,10 @@ async fn http_api(
                         if matches!(action, ClientListAction::RemoveEntry) {
                             if let Some(entry) = data_manager.client_list().get(&hostname) {
                                 if entry.connection_state != ConnectionState::Disconnected {
-                                    CLIENTS_TO_BE_REMOVED.lock().insert(hostname.clone());
+                                    connection_context
+                                        .clients_to_be_removed
+                                        .lock()
+                                        .insert(hostname.clone());
 
                                     action = ClientListAction::SetConnectionState(
                                         ConnectionState::Disconnecting,
@@ -137,10 +140,13 @@ async fn http_api(
                     }
                     ServerRequest::CaptureFrame => unsafe { crate::CaptureFrame() },
                     ServerRequest::InsertIdr => unsafe { crate::RequestIDR() },
-                    ServerRequest::StartRecording => {
-                        crate::create_recording_file(SERVER_DATA_MANAGER.read().settings())
+                    ServerRequest::StartRecording => crate::create_recording_file(
+                        connection_context,
+                        SERVER_DATA_MANAGER.read().settings(),
+                    ),
+                    ServerRequest::StopRecording => {
+                        *connection_context.video_recording_file.lock() = None
                     }
-                    ServerRequest::StopRecording => *VIDEO_RECORDING_FILE.lock() = None,
                     ServerRequest::FirewallRules(action) => {
                         if alvr_server_io::firewall_rules(action).is_ok() {
                             info!("Setting firewall rules succeeded!");
@@ -171,14 +177,14 @@ async fn http_api(
                             alvr_events::send_event(EventType::DriversList(list));
                         }
                     }
-                    ServerRequest::RestartSteamvr => {
-                        thread::spawn(crate::restart_driver);
-                    }
-                    ServerRequest::ShutdownSteamvr => {
-                        // This lint is bugged with extern "C"
-                        #[allow(clippy::redundant_closure)]
-                        thread::spawn(|| crate::shutdown_driver());
-                    }
+                    ServerRequest::RestartSteamvr => connection_context
+                        .events_queue
+                        .lock()
+                        .push_back(ServerCoreEvent::RestartPending),
+                    ServerRequest::ShutdownSteamvr => connection_context
+                        .events_queue
+                        .lock()
+                        .push_back(ServerCoreEvent::ShutdownPending),
                 }
 
                 reply(StatusCode::OK)?
@@ -187,14 +193,14 @@ async fn http_api(
             }
         }
         "/api/events" => {
-            websocket(request, events_sender, |e| {
+            websocket(request, LOGGING_EVENTS_SENDER.clone(), |e| {
                 protocol::Message::Text(json::to_string(&e).unwrap())
             })
             .await?
         }
         "/api/video-mirror" => {
             let sender = {
-                let mut sender_lock = VIDEO_MIRROR_SENDER.lock();
+                let mut sender_lock = connection_context.video_mirror_sender.lock();
                 if let Some(sender) = &mut *sender_lock {
                     sender.clone()
                 } else {
@@ -205,7 +211,7 @@ async fn http_api(
                 }
             };
 
-            if let Some(config) = &*DECODER_CONFIG.lock() {
+            if let Some(config) = &*connection_context.decoder_config.lock() {
                 sender.send(config.config_buffer.clone()).ok();
             }
 
@@ -216,30 +222,24 @@ async fn http_api(
             res
         }
         "/api/set-buttons" => {
-            let buttons = from_request_body::<Vec<ButtonEvent>>(request).await?;
+            let button_entries = from_request_body::<Vec<ButtonEvent>>(request)
+                .await?
+                .iter()
+                .map(|b| ButtonEntry {
+                    path_id: alvr_common::hash_string(&b.path),
+                    value: b.value,
+                })
+                .collect();
 
-            for button in buttons {
-                let value = match button.value {
-                    ButtonValue::Binary(value) => FfiButtonValue {
-                        type_: crate::FfiButtonType_BUTTON_TYPE_BINARY,
-                        __bindgen_anon_1: crate::FfiButtonValue__bindgen_ty_1 {
-                            binary: value.into(),
-                        },
-                    },
-
-                    ButtonValue::Scalar(value) => FfiButtonValue {
-                        type_: crate::FfiButtonType_BUTTON_TYPE_SCALAR,
-                        __bindgen_anon_1: crate::FfiButtonValue__bindgen_ty_1 { scalar: value },
-                    },
-                };
-
-                unsafe { crate::SetButton(alvr_common::hash_string(&button.path), value) };
-            }
+            connection_context
+                .events_queue
+                .lock()
+                .push_back(ServerCoreEvent::Buttons(button_entries));
 
             reply(StatusCode::OK)?
         }
         "/api/average-video-latency-ms" => {
-            let latency = if let Some(manager) = &*STATISTICS_MANAGER.lock() {
+            let latency = if let Some(manager) = &*connection_context.statistics_manager.lock() {
                 manager.video_pipeline_latency_average().as_millis()
             } else {
                 0
@@ -294,20 +294,20 @@ async fn http_api(
     Ok(response)
 }
 
-pub async fn web_server(events_sender: broadcast::Sender<Event>) -> Result<()> {
+pub async fn web_server(connection_context: Arc<ConnectionContext>) -> Result<()> {
     let web_server_port = SERVER_DATA_MANAGER
         .read()
         .settings()
         .connection
         .web_server_port;
 
-    let service = service::make_service_fn(|_| {
-        let events_sender = events_sender.clone();
+    let service = service::make_service_fn(move |_| {
+        let connection_context = Arc::clone(&connection_context);
         async move {
             Ok::<_, anyhow::Error>(service::service_fn(move |request| {
-                let events_sender = events_sender.clone();
+                let connection_context = Arc::clone(&connection_context);
                 async move {
-                    let res = http_api(request, events_sender).await;
+                    let res = http_api(&connection_context, request).await;
                     if let Err(e) = &res {
                         alvr_common::show_e(e);
                     }

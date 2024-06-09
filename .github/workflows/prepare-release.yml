@@ -60,7 +60,46 @@ jobs:
           draft: true
           prerelease: false
           commitish: ${{ steps.output_ref.outputs.release_ref }}
-  
+
+  build_windows_streamer:
+    runs-on: windows-2019
+    needs: [prepare_release]
+    env:
+      # For bindgen to find libclang.dll, we need to give it the path to the Visual Studio package.
+      # This is specific to the GitHub windows-2019 runner.
+      LIBCLANG_PATH: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\Llvm\x64\bin'
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.prepare_release.outputs.release_ref }}
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - uses: crazy-max/ghaction-chocolatey@v1
+        with:
+          args: install zip unzip pkgconfiglite wixtoolset
+
+      - name: Build and package ALVR
+        id: build
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          cargo xtask prepare-deps --platform windows --ci
+          cargo xtask package-streamer --gpl
+
+      - name: Upload portable streamer for Windows
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.prepare_release.outputs.upload_url }}
+          asset_path: ./build/alvr_streamer_windows.zip
+          asset_name: alvr_streamer_windows.zip
+          asset_content_type: application/zip
+
   build_linux_streamer:
     runs-on: ubuntu-20.04
     needs: [prepare_release]
@@ -68,6 +107,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ needs.prepare_release.outputs.release_ref }}
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -153,6 +193,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ needs.prepare_release.outputs.release_ref }}
+        
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable

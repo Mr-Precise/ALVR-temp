@@ -4,7 +4,10 @@ use crate::{
     interaction::{self, InteractionContext},
     to_xr_fov, to_xr_pose, XrContext,
 };
-use alvr_client_core::{ClientCoreContext, DecodedFrame, Platform};
+use alvr_client_core::{
+    graphics::{GraphicsContext, StreamRenderer},
+    ClientCoreContext, DecodedFrame, Platform,
+};
 use alvr_common::{
     error,
     glam::{UVec2, Vec2, Vec3},
@@ -17,6 +20,7 @@ use alvr_session::{
 };
 use openxr as xr;
 use std::{
+    rc::Rc,
     sync::Arc,
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -72,12 +76,14 @@ pub struct StreamContext {
     last_good_view_params: [ViewParams; 2],
     input_thread: Option<JoinHandle<()>>,
     input_thread_running: Arc<RelaxedAtomic>,
+    renderer: StreamRenderer,
 }
 
 impl StreamContext {
     pub fn new(
         core_ctx: Arc<ClientCoreContext>,
         xr_ctx: XrContext,
+        gfx_ctx: Rc<GraphicsContext>,
         interaction_ctx: Arc<InteractionContext>,
         platform: Platform,
         config: &StreamConfig,
@@ -164,7 +170,8 @@ impl StreamContext {
             ),
         ];
 
-        alvr_client_core::opengl::start_stream(
+        let renderer = StreamRenderer::new(
+            gfx_ctx,
             config.view_resolution,
             [
                 swapchains[0]
@@ -207,7 +214,10 @@ impl StreamContext {
 
         let input_thread_running = Arc::new(RelaxedAtomic::new(true));
 
-        let reference_space = Arc::new(interaction::get_stage_reference_space(&xr_ctx.session));
+        let reference_space = Arc::new(interaction::get_reference_space(
+            &xr_ctx.session,
+            xr::ReferenceSpaceType::STAGE,
+        ));
 
         let input_thread = thread::spawn({
             let core_ctx = Arc::clone(&core_ctx);
@@ -239,14 +249,16 @@ impl StreamContext {
             last_good_view_params: [ViewParams::default(); 2],
             input_thread: Some(input_thread),
             input_thread_running,
+            renderer,
         }
     }
 
     pub fn update_reference_space(&mut self) {
         self.input_thread_running.set(false);
 
-        self.reference_space = Arc::new(interaction::get_stage_reference_space(
+        self.reference_space = Arc::new(interaction::get_reference_space(
             &self.xr_context.session,
+            xr::ReferenceSpaceType::STAGE,
         ));
 
         self.core_context.send_playspace(
@@ -313,10 +325,8 @@ impl StreamContext {
             .wait_image(xr::Duration::INFINITE)
             .unwrap();
 
-        alvr_client_core::opengl::render_stream(
-            buffer_ptr,
-            [left_swapchain_idx, right_swapchain_idx],
-        );
+        self.renderer
+            .render(buffer_ptr, [left_swapchain_idx, right_swapchain_idx]);
 
         self.swapchains[0].release_image().unwrap();
         self.swapchains[1].release_image().unwrap();

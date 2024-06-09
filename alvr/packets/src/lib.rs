@@ -79,7 +79,8 @@ pub fn decode_video_streaming_capabilities(
         }
     }
 
-    let caps_json = json::from_str::<json::Value>(&String::from_utf8(json_bytes)?)?;
+    let caps_json =
+        json::from_str::<json::Value>(&String::from_utf8(json_bytes)?).unwrap_or(json::Value::Null);
 
     Ok(VideoStreamingCapabilities {
         default_view_resolution: legacy.default_view_resolution,
@@ -183,7 +184,7 @@ pub struct ViewsConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BatteryPacket {
+pub struct BatteryInfo {
     pub device_id: u64,
     pub gauge_value: f32, // range [0, 1]
     pub is_plugged: bool,
@@ -223,7 +224,7 @@ pub enum ClientControlPacket {
     KeepAlive,
     StreamReady, // This flag notifies the server the client streaming socket is ready listening
     ViewsConfig(ViewsConfig),
-    Battery(BatteryPacket),
+    Battery(BatteryInfo),
     VideoErrorReport, // legacy
     Buttons(Vec<ButtonEntry>),
     ActiveInteractionProfile { device_id: u64, profile_id: u64 },
@@ -232,7 +233,7 @@ pub enum ClientControlPacket {
     ReservedBuffer(Vec<u8>),
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct FaceData {
     pub eye_gazes: [Option<Pose>; 2],
     pub fb_face_expression: Option<Vec<f32>>, // issue: Serialize does not support [f32; 63]

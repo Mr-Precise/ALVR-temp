@@ -87,7 +87,6 @@ fn clippy() {
         "clone_on_ref_ptr",
         "create_dir",
         "decimal_literal_representation",
-        "else_if_without_else",
         "expect_used",
         "float_cmp_const",
         "fn_to_numeric_cast_any",
@@ -177,6 +176,7 @@ fn main() {
                         match platform.as_str() {
                             "windows" => dependencies::prepare_windows_deps(for_ci),
                             "linux" => dependencies::prepare_linux_deps(!no_nvidia),
+                            "macos" => dependencies::prepare_macos_deps(),
                             "android" => dependencies::build_android_deps(for_ci),
                             _ => panic!("Unrecognized platform."),
                         }
@@ -227,6 +227,7 @@ fn main() {
                 "clean" => clean(),
                 "bump" => version::bump_version(version, is_nightly),
                 "clippy" => clippy(),
+                "check-msrv" => version::check_msrv(),
                 "kill-oculus" => kill_oculus_processes(),
                 _ => {
                     println!("\nUnrecognized subcommand.");
