@@ -63,14 +63,14 @@ pub fn prepare_ffmpeg_windows(deps_path: &Path) {
     command::download_and_extract_zip(
         &format!(
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/{}",
-            "ffmpeg-n5.1-latest-win64-gpl-shared-5.1.zip"
+            "ffmpeg-n7.0-latest-win64-gpl-shared-7.0.zip"
         ),
         deps_path,
     )
     .unwrap();
 
     fs::rename(
-        deps_path.join("ffmpeg-n5.1-latest-win64-gpl-shared-5.1"),
+        deps_path.join("ffmpeg-n7.0-latest-win64-gpl-shared-7.0"),
         deps_path.join("ffmpeg"),
     )
     .unwrap();
@@ -154,14 +154,14 @@ pub fn build_ffmpeg_linux(nvenc_flag: bool, deps_path: &Path) {
     let sh = Shell::new().unwrap();
 
     command::download_and_extract_zip(
-        "https://codeload.github.com/FFmpeg/FFmpeg/zip/n6.0",
+        "https://codeload.github.com/FFmpeg/FFmpeg/zip/master",
         deps_path,
     )
     .unwrap();
 
     let final_path = deps_path.join("ffmpeg");
 
-    fs::rename(deps_path.join("FFmpeg-n6.0"), &final_path).unwrap();
+    fs::rename(deps_path.join("FFmpeg-master"), &final_path).unwrap();
 
     let flags = [
         "--enable-gpl",
