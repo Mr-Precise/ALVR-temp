@@ -14,9 +14,9 @@ pub enum FrameSize {
     Scale(#[schema(gui(slider(min = 0.25, max = 2.0, step = 0.01)))] f32),
 
     Absolute {
-        #[schema(gui(slider(min = 32, max = 0x1000, step = 32)))]
+        #[schema(gui(slider(min = 32, max = 8192, step = 32)))]
         width: u32,
-        #[schema(gui(slider(min = 32, max = 0x1000, step = 32)))]
+        #[schema(gui(slider(min = 32, max = 8192, step = 32)))]
         height: Option<u32>,
     },
 }
@@ -455,11 +455,11 @@ pub struct FoveatedEncodingConfig {
 #[repr(C)]
 #[derive(SettingsSchema, Clone, Copy, Serialize, Deserialize, Pod, Zeroable)]
 pub struct ColorCorrectionConfig {
-    #[schema(gui(slider(min = -1.0, max = 1.0, step = 0.01)))]
+    #[schema(gui(slider(min = -1.0, max = 1.0, step = 0.001)))]
     #[schema(flag = "steamvr-restart")]
     pub brightness: f32,
 
-    #[schema(gui(slider(min = -1.0, max = 1.0, step = 0.01)))]
+    #[schema(gui(slider(min = -1.0, max = 1.0, step = 0.001)))]
     #[schema(flag = "steamvr-restart")]
     pub contrast: f32,
 
@@ -568,15 +568,6 @@ pub struct VideoConfig {
     pub clientside_foveation: Switch<ClientsideFoveationConfig>,
 }
 
-#[derive(SettingsSchema, Serialize, Deserialize, Clone, Copy)]
-#[schema(gui = "button_group")]
-pub enum LinuxAudioBackend {
-    #[schema(strings(display_name = "ALSA"))]
-    Alsa,
-
-    Jack,
-}
-
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
 #[schema(gui = "button_group")]
 pub enum CustomAudioDeviceConfig {
@@ -601,8 +592,10 @@ pub struct AudioBufferingConfig {
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
 #[schema(collapsible)]
 pub struct GameAudioConfig {
+    #[cfg_attr(target_os = "linux", schema(flag = "hidden"))]
     pub device: Option<CustomAudioDeviceConfig>,
 
+    #[cfg_attr(target_os = "linux", schema(flag = "hidden"))]
     #[schema(strings(display_name = "Mute desktop audio when streaming"))]
     pub mute_when_streaming: bool,
 
@@ -633,7 +626,9 @@ pub enum MicrophoneDevicesConfig {
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
 #[schema(collapsible)]
 pub struct MicrophoneConfig {
+    #[cfg_attr(target_os = "linux", schema(flag = "hidden"))]
     pub devices: MicrophoneDevicesConfig,
+
     pub buffering: AudioBufferingConfig,
 }
 
@@ -644,9 +639,6 @@ pub struct AudioConfig {
 
     #[schema(strings(display_name = "Headset microphone"))]
     pub microphone: Switch<MicrophoneConfig>,
-
-    #[schema(strings(help = "ALSA is recommended for most PulseAudio or PipeWire-based setups"))]
-    pub linux_backend: LinuxAudioBackend,
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
@@ -782,8 +774,7 @@ pub struct AutomaticButtonMappingConfig {
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
-#[schema(collapsible)]
-pub struct HandGestureConfig {
+pub struct HandTrackingInteractionConfig {
     #[schema(flag = "real-time")]
     pub only_touch: bool,
 
@@ -874,23 +865,32 @@ pub struct HapticsConfig {
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+pub struct HandSkeletonConfig {
+    #[schema(flag = "steamvr-restart")]
+    #[schema(strings(
+        help = r"Enabling this will use separate tracker objects with the full skeletal tracking level when hand tracking is detected. This is required for VRChat hand tracking."
+    ))]
+    pub use_separate_trackers: bool,
+}
+
+#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
 #[schema(collapsible)]
 pub struct ControllersConfig {
     #[schema(strings(help = "Turning this off will make the controllers appear powered off."))]
     #[schema(flag = "real-time")]
     pub tracked: bool,
 
-    #[schema(flag = "real-time")]
+    #[schema(flag = "steamvr-restart")]
     #[schema(strings(
         help = "Enabling this passes skeletal hand data (finger tracking) to SteamVR."
     ))]
-    pub enable_skeleton: bool,
+    pub hand_skeleton: Switch<HandSkeletonConfig>,
 
     #[schema(flag = "real-time")]
     #[schema(strings(
         help = "Enabling this allows using hand gestures to emulate controller inputs."
     ))]
-    pub gestures: Switch<HandGestureConfig>,
+    pub hand_tracking_interaction: Switch<HandTrackingInteractionConfig>,
 
     #[schema(strings(
         display_name = "Prediction",
@@ -1440,11 +1440,8 @@ pub fn session_settings_default() -> SettingsDefault {
             },
         },
         audio: AudioConfigDefault {
-            linux_backend: LinuxAudioBackendDefault {
-                variant: LinuxAudioBackendDefaultVariant::Alsa,
-            },
             game_audio: SwitchDefault {
-                enabled: !cfg!(target_os = "linux"),
+                enabled: true,
                 content: GameAudioConfigDefault {
                     gui_collapsed: true,
                     device: OptionalDefault {
@@ -1460,7 +1457,7 @@ pub fn session_settings_default() -> SettingsDefault {
                 },
             },
             microphone: SwitchDefault {
-                enabled: false,
+                enabled: cfg!(target_os = "linux"),
                 content: MicrophoneConfigDefault {
                     gui_collapsed: true,
                     devices: MicrophoneDevicesConfigDefault {
@@ -1530,7 +1527,12 @@ pub fn session_settings_default() -> SettingsDefault {
                 content: ControllersConfigDefault {
                     gui_collapsed: false,
                     tracked: true,
-                    enable_skeleton: true,
+                    hand_skeleton: SwitchDefault {
+                        enabled: true,
+                        content: HandSkeletonConfigDefault {
+                            use_separate_trackers: true,
+                        },
+                    },
                     emulation_mode: ControllersEmulationModeDefault {
                         Custom: ControllersEmulationModeCustomDefault {
                             serial_number: "ALVR Controller".into(),
@@ -1587,11 +1589,10 @@ pub fn session_settings_default() -> SettingsDefault {
                         },
                         force_threshold: 0.8,
                     },
-                    gestures: SwitchDefault {
-                        enabled: true,
-                        content: HandGestureConfigDefault {
-                            gui_collapsed: true,
-                            only_touch: true,
+                    hand_tracking_interaction: SwitchDefault {
+                        enabled: false,
+                        content: HandTrackingInteractionConfigDefault {
+                            only_touch: false,
                             pinch_touch_distance: 0.0,
                             pinch_trigger_distance: 0.25,
                             curl_touch_distance: 2.0,

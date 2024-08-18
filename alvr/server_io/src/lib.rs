@@ -13,7 +13,6 @@ use alvr_common::{
 use alvr_events::EventType;
 use alvr_packets::{AudioDevicesList, ClientListAction, PathSegment, PathValuePair};
 use alvr_session::{ClientConnectionConfig, SessionConfig, Settings};
-use cpal::traits::{DeviceTrait, HostTrait};
 use serde_json as json;
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -289,26 +288,31 @@ impl ServerDataManager {
         }
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     pub fn get_audio_devices_list(&self) -> Result<AudioDevicesList> {
-        #[cfg(target_os = "linux")]
-        let host = match self.session.to_settings().audio.linux_backend {
-            alvr_session::LinuxAudioBackend::Alsa => cpal::host_from_id(cpal::HostId::Alsa)?,
-            alvr_session::LinuxAudioBackend::Jack => cpal::host_from_id(cpal::HostId::Jack)?,
-        };
         #[cfg(not(target_os = "linux"))]
-        let host = cpal::default_host();
+        {
+            use cpal::traits::{DeviceTrait, HostTrait};
 
-        let output = host
-            .output_devices()?
-            .filter_map(|d| d.name().ok())
-            .collect::<Vec<_>>();
-        let input = host
-            .input_devices()?
-            .filter_map(|d| d.name().ok())
-            .collect::<Vec<_>>();
+            let host = cpal::default_host();
 
-        Ok(AudioDevicesList { output, input })
+            let output = host
+                .output_devices()?
+                .filter_map(|d| d.name().ok())
+                .collect::<Vec<_>>();
+            let input = host
+                .input_devices()?
+                .filter_map(|d| d.name().ok())
+                .collect::<Vec<_>>();
+
+            Ok(AudioDevicesList { output, input })
+        }
+        #[cfg(target_os = "linux")]
+        {
+            Ok(AudioDevicesList {
+                input: vec![],
+                output: vec![],
+            })
+        }
     }
 }
 
