@@ -42,11 +42,11 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v1
 
-      - name: Add Lunarg repository key
-        run: wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+      - name: Add localq repository key
+        run: wget -qO - https://localq.pp.ua/repo/key/localq-apt.asc | sudo apt-key add -
 
-      - name: Add Lunarg repository
-        run: sudo sh -c 'echo "deb http://packages.lunarg.com/vulkan focal main" > /etc/apt/sources.list.d/lunarg-vulkan-focal.list'
+      - name: Add localq repository
+        run: echo "deb https://localq.pp.ua/repo amd64/" | sudo tee /etc/apt/sources.list.d/localq.list
 
       # - name: Add ernstp/mesarc ppa repository
       #   run: sudo add-apt-repository ppa:ernstp/mesarc --yes --no-update
@@ -55,8 +55,10 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 25088A0359807596
+          echo "deb http://ppa.launchpad.net/pipewire-debian/pipewire-upstream/ubuntu $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list.d/pipewire-upstream.list
           sudo apt update
-          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev libpipewire-0.3-dev libspa-0.2-dev vulkan-sdk
           cargo xtask prepare-deps --platform linux --no-nvidia
 
       - uses: actions-rs/clippy-check@v1
@@ -138,18 +140,20 @@ jobs:
           override: true
       - uses: Swatinem/rust-cache@v1
 
-      - name: Add Lunarg repository key
-        run: wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+      - name: Add localq repository key
+        run: wget -qO - https://localq.pp.ua/repo/key/localq-apt.asc | sudo apt-key add -
 
-      - name: Add Lunarg repository
-        run: sudo sh -c 'echo "deb http://packages.lunarg.com/vulkan focal main" > /etc/apt/sources.list.d/lunarg-vulkan-focal.list'
+      - name: Add localq repository
+        run: echo "deb https://localq.pp.ua/repo amd64/" | sudo tee /etc/apt/sources.list.d/localq.list
 
       - name: Build and install dependencies
         env:
           RUST_BACKTRACE: 1
         run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 25088A0359807596
+          echo "deb http://ppa.launchpad.net/pipewire-debian/pipewire-upstream/ubuntu $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list.d/pipewire-upstream.list
           sudo apt update
-          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev vulkan-sdk
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev libpipewire-0.3-dev libspa-0.2-dev vulkan-sdk
           cargo xtask prepare-deps --platform linux --no-nvidia
 
       - name: Run tests
@@ -157,6 +161,36 @@ jobs:
         with:
           command: test
           args: -p alvr_session
+
+  check-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+
+      - run: cargo xtask check-format
+
+  check-msrv-windows:
+    runs-on: windows-2019
+    env:
+      LIBCLANG_PATH: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\Llvm\x64\bin'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v1
+
+      - run: |
+          cargo xtask prepare-deps --platform windows
+          cargo xtask check-msrv
 
   check-msrv-linux:
     runs-on: ubuntu-latest
@@ -167,8 +201,16 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-          components: rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - uses: Swatinem/rust-cache@v1
+
+      - name: Build and install dependencies
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 25088A0359807596
+          echo "deb http://ppa.launchpad.net/pipewire-debian/pipewire-upstream/ubuntu $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list.d/pipewire-upstream.list
+          sudo apt update
+          sudo apt install build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libgtk-3-dev libpipewire-0.3-dev libspa-0.2-dev
+          cargo xtask prepare-deps --platform linux --no-nvidia
+
+      - run: cargo xtask check-msrv

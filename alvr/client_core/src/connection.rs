@@ -136,7 +136,7 @@ fn connection_pipeline(
                 return Ok(());
             }
 
-            announcer_socket.announce().to_con()?;
+            announcer_socket.announce().ok();
 
             if let Ok(pair) = ProtoControlSocket::connect_to(
                 SOCKET_INIT_RETRY_INTERVAL,
@@ -324,7 +324,7 @@ fn connection_pipeline(
     });
 
     let game_audio_thread = if let Switch::Enabled(config) = settings.audio.game_audio {
-        let device = AudioDevice::new_output(None, None).to_con()?;
+        let device = AudioDevice::new_output(None).to_con()?;
         thread::spawn({
             let ctx = Arc::clone(&ctx);
             move || {

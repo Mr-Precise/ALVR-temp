@@ -7,8 +7,8 @@ use std::{collections::BTreeMap, io::Cursor, sync::mpsc, thread};
 use ui::Launcher;
 
 pub struct ReleaseChannelsInfo {
-    stable: Vec<ReleaseInfo>,
-    nightly: Vec<ReleaseInfo>,
+    custom: Vec<ReleaseInfo>,
+    official: Vec<ReleaseInfo>,
 }
 
 pub struct Progress {
@@ -66,11 +66,11 @@ fn main() {
             ..Default::default()
         },
         Box::new(move |cc| {
-            Box::new(Launcher::new(
+            Ok(Box::new(Launcher::new(
                 cc,
                 worker_message_receiver,
                 ui_message_sender,
-            ))
+            )))
         }),
     )
     .expect("Failed to run eframe");

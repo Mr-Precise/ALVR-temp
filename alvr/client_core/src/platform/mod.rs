@@ -68,7 +68,7 @@ pub fn platform() -> Platform {
             ("Oculus", _, "eureka") => Platform::Quest3,
             ("Oculus", _, "seacliff") => Platform::QuestPro,
             ("Oculus", _, _) => Platform::QuestUnknown,
-            ("Pico", "Pico Neo 3", _) => Platform::PicoNeo3,
+            ("Pico", "Pico Neo 3" | "Pico Neo3 Link", _) => Platform::PicoNeo3,
             ("Pico", _, _) => Platform::Pico4,
             ("HTC", "VIVE Focus 3", _) => Platform::Focus3,
             ("HTC", "VIVE XR Series", _) => Platform::XRElite,
