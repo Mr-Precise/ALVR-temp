@@ -42,11 +42,11 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v1
 
-      - name: Add localq repository key
-        run: wget -qO - https://localq.pp.ua/repo/key/localq-apt.asc | sudo apt-key add -
+      - name: Add Lunarg repository key
+        run: wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
 
-      - name: Add localq repository
-        run: echo "deb https://localq.pp.ua/repo amd64/" | sudo tee /etc/apt/sources.list.d/localq.list
+      - name: Add Lunarg repository
+        run: sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.3.283-focal.list https://packages.lunarg.com/vulkan/1.3.283/lunarg-vulkan-1.3.283-focal.list
 
       # - name: Add ernstp/mesarc ppa repository
       #   run: sudo add-apt-repository ppa:ernstp/mesarc --yes --no-update
