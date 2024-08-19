@@ -4,6 +4,12 @@
 
 [![badge-discord][]][link-discord] [![badge-matrix][]][link-matrix] [![badge-opencollective][]][link-opencollective]
 
+* This is a **Fork** ALVR for experiments on linux, backport to Ubuntu 20.04 and custom build with latest ffmpeg and Vulkan
+* **Bugs from this fork should be reported** [**here**](https://github.com/Mr-Precise/ALVR-temp/issues), not to the original author.
+* Original author [**alvr-org/ALVR**](https://github.com/alvr-org/ALVR)  
+
+---
+
 Stream VR games from your PC to your headset via Wi-Fi.  
 ALVR uses technologies like [Asynchronous Timewarp](https://developer.oculus.com/documentation/native/android/mobile-timewarp-overview) and [Fixed Foveated Rendering](https://developer.oculus.com/documentation/native/android/mobile-ffr) for a smoother experience.  
 Most of the games that run on SteamVR or Oculus Software (using Revive) should work with ALVR.  
