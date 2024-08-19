@@ -30,8 +30,8 @@ enum PopupType {
 
 #[derive(Clone, PartialEq, Eq)]
 enum ReleaseChannelType {
-    Stable,
-    Nightly,
+    Custom,
+    Official,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -78,27 +78,27 @@ impl Launcher {
                 Some(move |ui: &mut Ui| {
                     let (channel, version_str, versions): (&str, String, Vec<Version>) =
                         match version.release_channel.clone() {
-                            ReleaseChannelType::Stable => (
-                                "Stable",
+                            ReleaseChannelType::Custom => (
+                                "Custom",
                                 version.string.clone(),
                                 release_channels_info
-                                    .stable
+                                    .custom
                                     .iter()
                                     .map(|release| Version {
                                         string: release.version.clone(),
-                                        release_channel: ReleaseChannelType::Stable,
+                                        release_channel: ReleaseChannelType::Custom,
                                     })
                                     .collect(),
                             ),
-                            ReleaseChannelType::Nightly => (
-                                "Nightly",
+                            ReleaseChannelType::Official => (
+                                "Official",
                                 version.string.clone(),
                                 release_channels_info
-                                    .nightly
+                                    .official
                                     .iter()
                                     .map(|release| Version {
                                         string: release.version.clone(),
-                                        release_channel: ReleaseChannelType::Nightly,
+                                        release_channel: ReleaseChannelType::Official,
                                     })
                                     .collect(),
                             ),
@@ -113,20 +113,20 @@ impl Launcher {
                                     ui.selectable_value(
                                         &mut version,
                                         Version {
-                                            string: release_channels_info.stable[0].version.clone(),
-                                            release_channel: ReleaseChannelType::Stable,
+                                            string: release_channels_info.custom[0].version.clone(),
+                                            release_channel: ReleaseChannelType::Custom,
                                         },
-                                        "Stable",
+                                        "Custom",
                                     );
                                     ui.selectable_value(
                                         &mut version,
                                         Version {
-                                            string: release_channels_info.nightly[0]
+                                            string: release_channels_info.official[0]
                                                 .version
                                                 .clone(),
-                                            release_channel: ReleaseChannelType::Nightly,
+                                            release_channel: ReleaseChannelType::Official,
                                         },
-                                        "Nightly",
+                                        "Official",
                                     );
                                 })
                         });
@@ -154,20 +154,20 @@ impl Launcher {
             Some(ModalButton::Custom(_)) => {
                 self.ui_message_sender
                     .send(UiMessage::InstallServer(match &version.release_channel {
-                        ReleaseChannelType::Stable => self
+                        ReleaseChannelType::Custom => self
                             .release_channels_info
                             .as_ref()
                             .unwrap()
-                            .stable
+                            .custom
                             .iter()
                             .find(|release| release.version == version.string)
                             .unwrap()
                             .clone(),
-                        ReleaseChannelType::Nightly => self
+                        ReleaseChannelType::Official => self
                             .release_channels_info
                             .as_ref()
                             .unwrap()
-                            .nightly
+                            .official
                             .iter()
                             .find(|release| release.version == version.string)
                             .unwrap()
@@ -259,7 +259,7 @@ impl eframe::App for Launcher {
                 ui.with_layout(Layout::top_down(Align::Center), |ui| {
                     ui.label(RichText::new("ALVR Launcher").size(25.0).strong());
                     ui.label(match &self.release_channels_info {
-                        Some(data) => format!("Latest stable release: {}", data.stable[0].version),
+                        Some(data) => format!("Latest custom release: {}", data.custom[0].version),
                         None => "Fetching latest release...".into(),
                     });
 
@@ -345,10 +345,10 @@ impl eframe::App for Launcher {
                         .clicked()
                     {
                         self.popup = PopupType::Version(Version {
-                            string: self.release_channels_info.as_ref().unwrap().stable[0]
+                            string: self.release_channels_info.as_ref().unwrap().custom[0]
                                 .version
                                 .clone(),
-                            release_channel: ReleaseChannelType::Stable,
+                            release_channel: ReleaseChannelType::Custom,
                         });
                     }
 

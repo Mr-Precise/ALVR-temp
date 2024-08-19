@@ -83,14 +83,14 @@ pub fn worker(
 
 async fn fetch_all_releases(client: &reqwest::Client) -> Result<ReleaseChannelsInfo> {
     Ok(ReleaseChannelsInfo {
-        stable: fetch_releases_for_repo(
+        custom: fetch_releases_for_repo(
             client,
-            "https://api.github.com/repos/alvr-org/ALVR/releases",
+            "https://api.github.com/repos/Mr-Precise/ALVR-temp/releases",
         )
         .await?,
-        nightly: fetch_releases_for_repo(
+        official: fetch_releases_for_repo(
             client,
-            "https://api.github.com/repos/alvr-org/ALVR-nightly/releases",
+            "https://api.github.com/repos/alvr-org/ALVR/releases",
         )
         .await?,
     })
@@ -124,13 +124,13 @@ pub fn get_release(
     version: &str,
 ) -> Option<ReleaseInfo> {
     release_channels_info
-        .stable
+        .custom
         .iter()
         .find(|release| release.version == version)
         .cloned()
         .or_else(|| {
             release_channels_info
-                .nightly
+                .official
                 .iter()
                 .find(|release| release.version == version)
                 .cloned()
