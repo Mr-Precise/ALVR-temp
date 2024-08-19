@@ -7,8 +7,8 @@ use std::{collections::BTreeMap, io::Cursor, sync::mpsc, thread};
 use ui::Launcher;
 
 pub struct ReleaseChannelsInfo {
-    stable: Vec<ReleaseInfo>,
-    nightly: Vec<ReleaseInfo>,
+    custom: Vec<ReleaseInfo>,
+    official: Vec<ReleaseInfo>,
 }
 
 pub struct Progress {
