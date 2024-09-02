@@ -77,8 +77,8 @@ pub fn record_audio_blocking(
         .set_mono()
         .set_i16()
         .set_input()
-        .set_usage(Usage::VoiceCommunication)
-        .set_input_preset(InputPreset::VoiceCommunication)
+        .set_usage(Usage::Media)
+        .set_input_preset(InputPreset::Unprocessed)
         .set_callback(RecorderCallback {
             is_running: Arc::clone(&is_running),
             sender,
