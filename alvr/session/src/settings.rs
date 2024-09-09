@@ -1,4 +1,7 @@
-use alvr_common::{LogSeverity, LogSeverityDefault, LogSeverityDefaultVariant};
+use alvr_common::{
+    DebugGroupsConfig, DebugGroupsConfigDefault, LogSeverity, LogSeverityDefault,
+    LogSeverityDefaultVariant,
+};
 use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 use settings_schema::{
@@ -679,14 +682,16 @@ pub struct FaceTrackingConfig {
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub struct BodyTrackingSourcesConfig {
-    pub body_tracking_full_body_meta: Switch<BodyTrackingFullBodyMETAConfig>,
+    pub body_tracking_fb: Switch<BodyTrackingFBConfig>,
+    // todo:
+    // pub detached_controllers_as_feet: bool,
+    // unfortunately multimodal is incompatible with body tracking. To make this usable we need to
+    // at least add support for an android client as 3dof waist tracker.
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
-#[schema(collapsible)]
-pub struct BodyTrackingFullBodyMETAConfig {
-    #[schema(strings(help = "Enable full body tracking"))]
-    pub enable_full_body: bool,
+pub struct BodyTrackingFBConfig {
+    pub full_body: bool,
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
@@ -870,7 +875,7 @@ pub struct HandSkeletonConfig {
     #[schema(strings(
         help = r"Enabling this will use separate tracker objects with the full skeletal tracking level when hand tracking is detected. This is required for VRChat hand tracking."
     ))]
-    pub use_separate_trackers: bool,
+    pub steamvr_input_2_0: bool,
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
@@ -885,6 +890,12 @@ pub struct ControllersConfig {
         help = "Enabling this passes skeletal hand data (finger tracking) to SteamVR."
     ))]
     pub hand_skeleton: Switch<HandSkeletonConfig>,
+
+    #[schema(strings(
+        help = r"Track hand skeleton while holding controllers. This will reduce hand tracking frequency to 30Hz.
+Because of runtime limitations, this option is ignored when body tracking is active."
+    ))]
+    pub multimodal_tracking: bool,
 
     #[schema(flag = "real-time")]
     #[schema(strings(
@@ -1146,6 +1157,10 @@ pub struct LoggingConfig {
 
     #[schema(flag = "real-time")]
     pub log_haptics: bool,
+
+    #[cfg_attr(not(debug_assertions), schema(flag = "hidden"))]
+    #[schema(strings(help = "These settings enable extra spammy logs for debugging purposes."))]
+    pub debug_groups: DebugGroupsConfig,
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone)]
@@ -1294,7 +1309,7 @@ pub fn session_settings_default() -> SettingsDefault {
                     variant: BitrateModeDefaultVariant::ConstantMbps,
                 },
                 adapt_to_framerate: SwitchDefault {
-                    enabled: true,
+                    enabled: false,
                     content: BitrateAdaptiveFramerateConfigDefault {
                         framerate_reset_threshold_multiplier: 2.0,
                     },
@@ -1507,12 +1522,9 @@ pub fn session_settings_default() -> SettingsDefault {
                 content: BodyTrackingConfigDefault {
                     gui_collapsed: true,
                     sources: BodyTrackingSourcesConfigDefault {
-                        body_tracking_full_body_meta: SwitchDefault {
+                        body_tracking_fb: SwitchDefault {
                             enabled: true,
-                            content: BodyTrackingFullBodyMETAConfigDefault {
-                                gui_collapsed: true,
-                                enable_full_body: true,
-                            },
+                            content: BodyTrackingFBConfigDefault { full_body: true },
                         },
                     },
                     sink: BodyTrackingSinkConfigDefault {
@@ -1530,9 +1542,10 @@ pub fn session_settings_default() -> SettingsDefault {
                     hand_skeleton: SwitchDefault {
                         enabled: true,
                         content: HandSkeletonConfigDefault {
-                            use_separate_trackers: true,
+                            steamvr_input_2_0: true,
                         },
                     },
+                    multimodal_tracking: false,
                     emulation_mode: ControllersEmulationModeDefault {
                         Custom: ControllersEmulationModeCustomDefault {
                             serial_number: "ALVR Controller".into(),
@@ -1709,6 +1722,18 @@ pub fn session_settings_default() -> SettingsDefault {
                 },
                 prefer_backtrace: false,
                 show_notification_tip: true,
+                debug_groups: DebugGroupsConfigDefault {
+                    server_impl: false,
+                    client_impl: false,
+                    server_core: false,
+                    client_core: false,
+                    connection: false,
+                    sockets: false,
+                    server_gfx: false,
+                    client_gfx: false,
+                    encoder: false,
+                    decoder: false,
+                },
             },
             steamvr_launcher: SteamvrLauncherDefault {
                 driver_launch_action: DriverLaunchActionDefault {
