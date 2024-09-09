@@ -192,6 +192,16 @@ pub unsafe extern "C" fn alvr_log(level: AlvrLogLevel, message: *const c_char) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn alvr_dbg_client_impl(message: *const c_char) {
+    alvr_common::dbg_client_impl!("{}", CStr::from_ptr(message).to_str().unwrap())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alvr_dbg_decoder(message: *const c_char) {
+    alvr_common::dbg_decoder!("{}", CStr::from_ptr(message).to_str().unwrap())
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn alvr_log_time(tag: *const c_char) {
     let tag = CStr::from_ptr(tag).to_str().unwrap();
     error!("[ALVR NATIVE] {tag}: {:?}", Instant::now());
@@ -802,7 +812,7 @@ pub unsafe extern "C" fn alvr_render_lobby_opengl(view_inputs: *const AlvrViewIn
 
     LOBBY_RENDERER.with_borrow(|renderer| {
         if let Some(renderer) = renderer {
-            renderer.render(view_inputs, [(None, None), (None, None)]);
+            renderer.render(view_inputs, [(None, None), (None, None)], None);
         }
     });
 }

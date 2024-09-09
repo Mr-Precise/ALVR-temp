@@ -27,6 +27,13 @@ struct FfiDeviceMotion {
     float angularVelocity[3];
 };
 
+struct FfiHandData {
+    unsigned int tracked;
+    const FfiDeviceMotion* controllerMotion;
+    const FfiHandSkeleton* handSkeleton;
+    bool useHandTracker;
+};
+
 struct FfiBodyTracker {
     unsigned int trackerID;
     FfiQuat orientation;
@@ -113,6 +120,7 @@ extern "C" void (*LogError)(const char* stringPtr);
 extern "C" void (*LogWarn)(const char* stringPtr);
 extern "C" void (*LogInfo)(const char* stringPtr);
 extern "C" void (*LogDebug)(const char* stringPtr);
+extern "C" void (*LogEncoder)(const char* stringPtr);
 extern "C" void (*LogPeriodically)(const char* tag, const char* stringPtr);
 extern "C" void (*DriverReadyIdle)(bool setDefaultChaprone);
 extern "C" void (*SetVideoConfigNals)(const unsigned char* configBuffer, int len, int codec);
@@ -141,13 +149,9 @@ extern "C" void RequestIDR();
 extern "C" void SetTracking(
     unsigned long long targetTimestampNs,
     float controllerPoseTimeOffsetS,
-    const FfiDeviceMotion* deviceMotions,
-    int motionsCount,
-    unsigned int controllersTracked,
-    bool useLeftHandTracker,
-    bool useRightHandTracker,
-    const FfiHandSkeleton* leftHand,
-    const FfiHandSkeleton* rightHand,
+    FfiDeviceMotion headMotion,
+    FfiHandData leftHandData,
+    FfiHandData rightHandData,
     const FfiBodyTracker* bodyTrackers,
     int bodyTrackersCount
 );
