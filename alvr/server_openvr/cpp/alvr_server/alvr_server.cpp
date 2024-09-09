@@ -88,6 +88,8 @@ public:
     std::map<uint64_t, TrackedDevice*> tracked_devices;
 
     virtual vr::EVRInitError Init(vr::IVRDriverContext* pContext) override {
+        Debug("DriverProvider::Init");
+
         VR_INIT_SERVER_DRIVER_CONTEXT(pContext);
         InitDriverLog(vr::VRDriverLog());
 
@@ -246,6 +248,8 @@ public:
         return vr::VRInitError_None;
     }
     virtual void Cleanup() override {
+        Debug("DriverProvider::Cleanup");
+
         this->left_hand_tracker.reset();
         this->right_hand_tracker.reset();
         this->left_controller.reset();
@@ -264,6 +268,8 @@ public:
         vr::VREvent_t event;
         while (vr::VRServerDriverHost()->PollNextEvent(&event, sizeof(vr::VREvent_t))) {
             if (event.eventType == vr::VREvent_Input_HapticVibration) {
+                Debug("DriverProvider: Received HapticVibration event");
+
                 vr::VREvent_HapticVibration_t haptics = event.data.hapticVibration;
 
                 uint64_t id = 0;
@@ -296,13 +302,15 @@ public:
 #endif
         }
         if (vr::VRServerDriverHost()->IsExiting() && !shutdown_called) {
+            Debug("DriverProvider: Received shutdown event");
+
             shutdown_called = true;
             ShutdownRuntime();
         }
     }
     virtual bool ShouldBlockStandbyMode() override { return false; }
-    virtual void EnterStandby() override { }
-    virtual void LeaveStandby() override { }
+    virtual void EnterStandby() override { Debug("DriverProvider::EnterStandby"); }
+    virtual void LeaveStandby() override { Debug("DriverProvider::LeaveStandby"); }
 } g_driver_provider;
 
 // bindigs for Rust
@@ -336,6 +344,7 @@ void (*LogError)(const char* stringPtr);
 void (*LogWarn)(const char* stringPtr);
 void (*LogInfo)(const char* stringPtr);
 void (*LogDebug)(const char* stringPtr);
+void (*LogEncoder)(const char* stringPtr);
 void (*LogPeriodically)(const char* tag, const char* stringPtr);
 void (*DriverReadyIdle)(bool setDefaultChaprone);
 void (*SetVideoConfigNals)(const unsigned char* configBuffer, int len, int codec);
@@ -397,57 +406,34 @@ void RequestIDR() {
 void SetTracking(
     unsigned long long targetTimestampNs,
     float controllerPoseTimeOffsetS,
-    const FfiDeviceMotion* deviceMotions,
-    int motionsCount,
-    unsigned int controllersTracked,
-    bool useLeftHandTracker,
-    bool useRightHandTracker,
-    const FfiHandSkeleton* leftHandSkeleton,
-    const FfiHandSkeleton* rightHandSkeleton,
+    FfiDeviceMotion headMotion,
+    FfiHandData leftHandData,
+    FfiHandData rightHandData,
     const FfiBodyTracker* bodyTrackers,
     int bodyTrackersCount
 ) {
-    for (int i = 0; i < motionsCount; i++) {
-        if (deviceMotions[i].deviceID == HEAD_ID && g_driver_provider.hmd) {
-            g_driver_provider.hmd->OnPoseUpdated(targetTimestampNs, deviceMotions[i]);
-        } else {
-            if (deviceMotions[i].deviceID == HAND_LEFT_ID) {
-                if (g_driver_provider.left_controller) {
-                    g_driver_provider.left_controller->onPoseUpdate(
-                        controllerPoseTimeOffsetS,
-                        deviceMotions[i],
-                        leftHandSkeleton,
-                        controllersTracked && !useLeftHandTracker
-                    );
-                }
-                if (g_driver_provider.left_hand_tracker) {
-                    g_driver_provider.left_hand_tracker->onPoseUpdate(
-                        controllerPoseTimeOffsetS,
-                        deviceMotions[i],
-                        leftHandSkeleton,
-                        controllersTracked && useLeftHandTracker
-                    );
-                }
-            } else if (deviceMotions[i].deviceID == HAND_RIGHT_ID) {
-                if (g_driver_provider.right_controller) {
-                    g_driver_provider.right_controller->onPoseUpdate(
-                        controllerPoseTimeOffsetS,
-                        deviceMotions[i],
-                        rightHandSkeleton,
-                        controllersTracked && !useRightHandTracker
-                    );
-                }
-                if (g_driver_provider.right_hand_tracker) {
-                    g_driver_provider.right_hand_tracker->onPoseUpdate(
-                        controllerPoseTimeOffsetS,
-                        deviceMotions[i],
-                        rightHandSkeleton,
-                        controllersTracked && useRightHandTracker
-                    );
-                }
-            }
-        }
+    if (g_driver_provider.hmd) {
+        g_driver_provider.hmd->OnPoseUpdated(targetTimestampNs, headMotion);
     }
+
+    if (g_driver_provider.left_hand_tracker) {
+        g_driver_provider.left_hand_tracker->onPoseUpdate(controllerPoseTimeOffsetS, leftHandData);
+    }
+
+    if (g_driver_provider.left_controller) {
+        g_driver_provider.left_controller->onPoseUpdate(controllerPoseTimeOffsetS, leftHandData);
+    }
+
+    if (g_driver_provider.right_hand_tracker) {
+        g_driver_provider.right_hand_tracker->onPoseUpdate(
+            controllerPoseTimeOffsetS, rightHandData
+        );
+    }
+
+    if (g_driver_provider.right_controller) {
+        g_driver_provider.right_controller->onPoseUpdate(controllerPoseTimeOffsetS, rightHandData);
+    }
+
     if (Settings::Instance().m_enableBodyTrackingFakeVive) {
         for (int i = 0; i < bodyTrackersCount; i++) {
             g_driver_provider.generic_trackers.at(bodyTrackers[i].trackerID)

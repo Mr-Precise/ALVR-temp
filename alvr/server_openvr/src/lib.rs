@@ -20,6 +20,7 @@ use alvr_common::{
     parking_lot::{Mutex, RwLock},
     settings_schema::Switch,
     warn, BUTTON_INFO, HAND_LEFT_ID, HAND_RIGHT_ID, HAND_TRACKER_LEFT_ID, HAND_TRACKER_RIGHT_ID,
+    HEAD_ID,
 };
 use alvr_filesystem as afs;
 use alvr_packets::{ButtonValue, Haptics};
@@ -112,32 +113,22 @@ extern "C" fn driver_ready_idle(set_default_chap: bool) {
                     tracking,
                     controllers_pose_time_offset,
                 } => {
-                    let controllers_config;
-                    let track_body;
-                    {
-                        let headset_config = &alvr_server_core::settings().headset;
+                    let headset_config = &alvr_server_core::settings().headset;
 
-                        controllers_config = headset_config.controllers.clone().into_option();
-                        track_body = headset_config.body_tracking.enabled();
-                    };
+                    let controllers_config = headset_config.controllers.clone().into_option();
+                    let track_body = headset_config.body_tracking.enabled();
 
                     let track_controllers = controllers_config
                         .as_ref()
                         .map(|c| c.tracked)
                         .unwrap_or(false);
 
-                    let left_openvr_hand_skeleton;
-                    let right_openvr_hand_skeleton;
-                    {
-                        let headset_config = &alvr_server_core::settings().headset;
-
-                        left_openvr_hand_skeleton = tracking.hand_skeletons[0].map(|s| {
-                            tracking::to_openvr_hand_skeleton(headset_config, *HAND_LEFT_ID, s)
-                        });
-                        right_openvr_hand_skeleton = tracking.hand_skeletons[1].map(|s| {
-                            tracking::to_openvr_hand_skeleton(headset_config, *HAND_RIGHT_ID, s)
-                        });
-                    }
+                    let left_openvr_hand_skeleton = tracking.hand_skeletons[0].map(|s| {
+                        tracking::to_openvr_hand_skeleton(headset_config, *HAND_LEFT_ID, s)
+                    });
+                    let right_openvr_hand_skeleton = tracking.hand_skeletons[1].map(|s| {
+                        tracking::to_openvr_hand_skeleton(headset_config, *HAND_RIGHT_ID, s)
+                    });
 
                     let (
                         use_separate_hand_trackers,
@@ -149,7 +140,7 @@ extern "C" fn driver_ready_idle(set_default_chap: bool) {
                     }) = controllers_config
                     {
                         (
-                            hand_skeleton_config.use_separate_trackers,
+                            hand_skeleton_config.steamvr_input_2_0,
                             left_openvr_hand_skeleton.map(tracking::to_ffi_skeleton),
                             right_openvr_hand_skeleton.map(tracking::to_ffi_skeleton),
                         )
@@ -157,11 +148,65 @@ extern "C" fn driver_ready_idle(set_default_chap: bool) {
                         (false, None, None)
                     };
 
-                    let ffi_motions = tracking
+                    let use_left_hand_tracker = use_separate_hand_trackers
+                        && tracking.hand_skeletons[0].is_some()
+                        && tracking
+                            .device_motions
+                            .iter()
+                            .all(|(id, _)| *id != *HAND_LEFT_ID);
+                    let use_right_hand_tracker = use_separate_hand_trackers
+                        && tracking.hand_skeletons[1].is_some()
+                        && tracking
+                            .device_motions
+                            .iter()
+                            .all(|(id, _)| *id != *HAND_RIGHT_ID);
+
+                    let ffi_head_motion = tracking
                         .device_motions
                         .iter()
-                        .map(|(id, motion)| tracking::to_ffi_motion(*id, *motion))
-                        .collect::<Vec<_>>();
+                        .find_map(|(id, motion)| {
+                            (*id == *HEAD_ID).then(|| tracking::to_ffi_motion(*HEAD_ID, *motion))
+                        })
+                        .unwrap_or_else(FfiDeviceMotion::default);
+                    let ffi_left_controller_motion =
+                        tracking.device_motions.iter().find_map(|(id, motion)| {
+                            (*id == *HAND_LEFT_ID)
+                                .then(|| tracking::to_ffi_motion(*HAND_LEFT_ID, *motion))
+                        });
+                    let ffi_right_controller_motion =
+                        tracking.device_motions.iter().find_map(|(id, motion)| {
+                            (*id == *HAND_RIGHT_ID)
+                                .then(|| tracking::to_ffi_motion(*HAND_RIGHT_ID, *motion))
+                        });
+
+                    let left_hand_data = FfiHandData {
+                        tracked: track_controllers.into(),
+                        controllerMotion: if let Some(motion) = &ffi_left_controller_motion {
+                            motion
+                        } else {
+                            ptr::null()
+                        },
+                        handSkeleton: if let Some(skeleton) = &ffi_left_hand_skeleton {
+                            skeleton
+                        } else {
+                            ptr::null()
+                        },
+                        useHandTracker: use_left_hand_tracker,
+                    };
+                    let right_hand_data = FfiHandData {
+                        tracked: track_controllers.into(),
+                        controllerMotion: if let Some(motion) = &ffi_right_controller_motion {
+                            motion
+                        } else {
+                            ptr::null()
+                        },
+                        handSkeleton: if let Some(skeleton) = &ffi_right_hand_skeleton {
+                            skeleton
+                        } else {
+                            ptr::null()
+                        },
+                        useHandTracker: use_right_hand_tracker,
+                    };
 
                     let ffi_body_trackers =
                         tracking::to_ffi_body_trackers(&tracking.device_motions, track_body);
@@ -174,21 +219,9 @@ extern "C" fn driver_ready_idle(set_default_chap: bool) {
                         SetTracking(
                             tracking.target_timestamp.as_nanos() as _,
                             controllers_pose_time_offset.as_secs_f32(),
-                            ffi_motions.as_ptr(),
-                            ffi_motions.len() as _,
-                            track_controllers.into(),
-                            use_separate_hand_trackers && tracking.hand_skeletons[0].is_some(),
-                            use_separate_hand_trackers && tracking.hand_skeletons[1].is_some(),
-                            if let Some(skeleton) = &ffi_left_hand_skeleton {
-                                skeleton
-                            } else {
-                                ptr::null()
-                            },
-                            if let Some(skeleton) = &ffi_right_hand_skeleton {
-                                skeleton
-                            } else {
-                                ptr::null()
-                            },
+                            ffi_head_motion,
+                            left_hand_data,
+                            right_hand_data,
                             if let Some(body_trackers) = &ffi_body_trackers {
                                 body_trackers.as_ptr()
                             } else {
@@ -274,15 +307,15 @@ pub extern "C" fn register_buttons(device_id: u64) {
 }
 
 extern "C" fn send_haptics(device_id: u64, duration_s: f32, frequency: f32, amplitude: f32) {
-    if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
-        let haptics = Haptics {
-            device_id,
-            duration: Duration::from_secs_f32(f32::max(duration_s, 0.0)),
-            frequency,
-            amplitude,
-        };
-
-        context.send_haptics(haptics);
+    if let Ok(duration) = Duration::try_from_secs_f32(duration_s) {
+        if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
+            context.send_haptics(Haptics {
+                device_id,
+                duration,
+                frequency,
+                amplitude,
+            });
+        }
     }
 }
 
@@ -377,7 +410,14 @@ pub unsafe extern "C" fn HmdDriverFactory(
 ) -> *mut c_void {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        alvr_server_core::init_logging();
+        alvr_server_core::initialize_environment(FILESYSTEM_LAYOUT.clone());
+
+        let log_to_disk = alvr_server_core::settings().extra.logging.log_to_disk;
+
+        alvr_server_core::init_logging(
+            log_to_disk.then(|| FILESYSTEM_LAYOUT.session_log()),
+            Some(FILESYSTEM_LAYOUT.crash_log()),
+        );
 
         unsafe {
             g_sessionPath = CString::new(FILESYSTEM_LAYOUT.session().to_string_lossy().to_string())
@@ -396,10 +436,11 @@ pub unsafe extern "C" fn HmdDriverFactory(
         graphics::initialize_shaders();
 
         unsafe {
-            LogError = Some(alvr_server_core::alvr_log_error);
-            LogWarn = Some(alvr_server_core::alvr_log_warn);
-            LogInfo = Some(alvr_server_core::alvr_log_info);
-            LogDebug = Some(alvr_server_core::alvr_log_debug);
+            LogError = Some(alvr_server_core::alvr_error);
+            LogWarn = Some(alvr_server_core::alvr_warn);
+            LogInfo = Some(alvr_server_core::alvr_info);
+            LogDebug = Some(alvr_server_core::alvr_dbg_server_impl);
+            LogEncoder = Some(alvr_server_core::alvr_dbg_encoder);
             LogPeriodically = Some(alvr_server_core::alvr_log_periodically);
             PathStringToHash = Some(alvr_server_core::alvr_path_to_id);
             GetSerialNumber = Some(props::get_serial_number);

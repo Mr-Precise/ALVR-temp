@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_variables)]
 #![allow(clippy::missing_safety_doc)]
 
-use crate::{logging_backend, ServerCoreContext, ServerCoreEvent, SERVER_DATA_MANAGER};
+use crate::{logging_backend, ServerCoreContext, ServerCoreEvent, SESSION_MANAGER};
 use alvr_common::{
     log,
     once_cell::sync::Lazy,
@@ -13,7 +13,9 @@ use alvr_session::CodecType;
 use std::{
     collections::{HashMap, VecDeque},
     ffi::{c_char, CStr, CString},
+    path::PathBuf,
     ptr,
+    str::FromStr,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -198,7 +200,7 @@ pub unsafe extern "C" fn alvr_path_to_id(path_string: *const c_char) -> u64 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alvr_log_error(string_ptr: *const c_char) {
+pub unsafe extern "C" fn alvr_error(string_ptr: *const c_char) {
     alvr_common::show_e(CStr::from_ptr(string_ptr).to_string_lossy());
 }
 
@@ -207,18 +209,23 @@ pub unsafe fn log(level: log::Level, string_ptr: *const c_char) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alvr_log_warn(string_ptr: *const c_char) {
+pub unsafe extern "C" fn alvr_warn(string_ptr: *const c_char) {
     log(log::Level::Warn, string_ptr);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alvr_log_info(string_ptr: *const c_char) {
+pub unsafe extern "C" fn alvr_info(string_ptr: *const c_char) {
     log(log::Level::Info, string_ptr);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alvr_log_debug(string_ptr: *const c_char) {
-    log(log::Level::Debug, string_ptr);
+pub unsafe extern "C" fn alvr_dbg_server_impl(string_ptr: *const c_char) {
+    alvr_common::dbg_server_impl!("{}", CStr::from_ptr(string_ptr).to_string_lossy());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alvr_dbg_encoder(string_ptr: *const c_char) {
+    alvr_common::dbg_encoder!("{}", CStr::from_ptr(string_ptr).to_string_lossy());
 }
 
 // Should not be used in production
@@ -247,9 +254,35 @@ pub extern "C" fn alvr_get_settings_json(buffer: *mut c_char) -> u64 {
     string_to_c_str(buffer, &serde_json::to_string(&crate::settings()).unwrap())
 }
 
+/// This must be called before alvr_initialize()
 #[no_mangle]
-pub extern "C" fn alvr_initialize_logging() {
-    logging_backend::init_logging();
+pub unsafe extern "C" fn alvr_initialize_environment(
+    config_dir: *const c_char,
+    log_dir: *const c_char,
+) {
+    let config_dir = PathBuf::from_str(CStr::from_ptr(config_dir).to_str().unwrap()).unwrap();
+    let log_dir = PathBuf::from_str(CStr::from_ptr(log_dir).to_str().unwrap()).unwrap();
+
+    crate::initialize_environment(alvr_filesystem::Layout {
+        config_dir,
+        log_dir,
+        ..Default::default()
+    });
+}
+
+/// Either session_log_path or crash_log_path can be null, in which case log is outputted to
+/// stdout/stderr on Windows.
+#[no_mangle]
+pub unsafe extern "C" fn alvr_initialize_logging(
+    session_log_path: *const c_char,
+    crash_log_path: *const c_char,
+) {
+    let session_log_path = (!session_log_path.is_null())
+        .then(|| PathBuf::from_str(CStr::from_ptr(session_log_path).to_str().unwrap()).unwrap());
+    let crash_log_path = (!crash_log_path.is_null())
+        .then(|| PathBuf::from_str(CStr::from_ptr(crash_log_path).to_str().unwrap()).unwrap());
+
+    logging_backend::init_logging(session_log_path, crash_log_path);
 }
 
 #[no_mangle]
@@ -258,8 +291,8 @@ pub unsafe extern "C" fn alvr_initialize() -> AlvrTargetConfig {
     *SERVER_CORE_CONTEXT.write() = Some(context);
     *EVENTS_RECEIVER.lock() = Some(receiver);
 
-    let data_manager_lock = SERVER_DATA_MANAGER.read();
-    let restart_settings = &data_manager_lock.session().openvr_config;
+    let session_manager_lock = SESSION_MANAGER.read();
+    let restart_settings = &session_manager_lock.session().openvr_config;
 
     AlvrTargetConfig {
         game_render_width: restart_settings.target_eye_resolution_width,
@@ -439,13 +472,15 @@ pub extern "C" fn alvr_send_haptics(
     frequency: f32,
     amplitude: f32,
 ) {
-    if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
-        context.send_haptics(Haptics {
-            device_id,
-            duration: Duration::from_secs_f32(f32::max(duration_s, 0.0)),
-            frequency,
-            amplitude,
-        });
+    if let Ok(duration) = Duration::try_from_secs_f32(duration_s) {
+        if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
+            context.send_haptics(Haptics {
+                device_id,
+                duration,
+                frequency,
+                amplitude,
+            });
+        }
     }
 }
 
