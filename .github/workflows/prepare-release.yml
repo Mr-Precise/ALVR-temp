@@ -129,6 +129,9 @@ jobs:
       - name: Add Lunarg repository
         run: sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
 
+      - name: Add PipeWire ppa
+        run: sudo add-apt-repository ppa:pipewire-debian/pipewire-upstream --yes --no-update
+
       # - name: Add ernstp/mesarc ppa repository
       #   run: sudo add-apt-repository ppa:ernstp/mesarc --yes --no-update
 
