@@ -24,14 +24,14 @@ pub struct StatisticsSummary {
 
 // Bitrate statistics minus the empirical output value
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct NominalBitrateStats {
-    pub scaled_calculated_bps: Option<f32>,
+pub struct BitrateDirectives {
+    pub scaled_calculated_throughput_bps: Option<f32>,
     pub decoder_latency_limiter_bps: Option<f32>,
     pub network_latency_limiter_bps: Option<f32>,
     pub encoder_latency_limiter_bps: Option<f32>,
-    pub manual_max_bps: Option<f32>,
-    pub manual_min_bps: Option<f32>,
-    pub requested_bps: f32,
+    pub manual_max_throughput_bps: Option<f32>,
+    pub manual_min_throughput_bps: Option<f32>,
+    pub requested_bitrate_bps: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -47,8 +47,9 @@ pub struct GraphStatistics {
     pub vsync_queue_s: f32,
     pub client_fps: f32,
     pub server_fps: f32,
-    pub nominal_bitrate: NominalBitrateStats,
-    pub actual_bitrate_bps: f32,
+    pub bitrate_directives: BitrateDirectives,
+    pub throughput_bps: f32,
+    pub bitrate_bps: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -75,6 +76,11 @@ pub struct HapticsEvent {
     pub amplitude: f32,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct AdbEvent {
+    pub download_progress: f32,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "id", content = "data")]
 pub enum EventType {
@@ -89,6 +95,7 @@ pub enum EventType {
     AudioDevices(AudioDevicesList),
     DriversList(Vec<PathBuf>),
     ServerRequestsSelfRestart,
+    Adb(AdbEvent),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -116,6 +123,7 @@ impl Event {
             EventType::AudioDevices(_) => "AUDIO DEV".to_string(),
             EventType::DriversList(_) => "DRV LIST".to_string(),
             EventType::ServerRequestsSelfRestart => "RESTART".to_string(),
+            EventType::Adb(_) => "ADB".to_string(),
         }
     }
 
@@ -132,6 +140,7 @@ impl Event {
             EventType::AudioDevices(devices) => serde_json::to_string(devices).unwrap(),
             EventType::DriversList(drivers) => serde_json::to_string(drivers).unwrap(),
             EventType::ServerRequestsSelfRestart => "Request for server restart".into(),
+            EventType::Adb(adb) => serde_json::to_string(adb).unwrap(),
         }
     }
 }
