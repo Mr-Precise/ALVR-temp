@@ -63,14 +63,14 @@ pub fn prepare_ffmpeg_windows(deps_path: &Path) {
     command::download_and_extract_zip(
         &format!(
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/{}",
-            "ffmpeg-n7.0-latest-win64-gpl-shared-7.0.zip"
+            "ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip"
         ),
         deps_path,
     )
     .unwrap();
 
     fs::rename(
-        deps_path.join("ffmpeg-n7.0-latest-win64-gpl-shared-7.0"),
+        deps_path.join("ffmpeg-n7.1-latest-win64-gpl-shared-7.1"),
         deps_path.join("ffmpeg"),
     )
     .unwrap();
