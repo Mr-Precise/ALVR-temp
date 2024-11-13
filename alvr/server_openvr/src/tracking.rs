@@ -1,4 +1,4 @@
-use crate::{FfiBodyTracker, FfiDeviceMotion, FfiHandSkeleton, FfiQuat};
+use crate::{FfiDeviceMotion, FfiHandSkeleton, FfiQuat};
 use alvr_common::{
     glam::{EulerRot, Quat, Vec3},
     once_cell::sync::Lazy,
@@ -7,12 +7,24 @@ use alvr_common::{
     BODY_LEFT_KNEE_ID, BODY_RIGHT_ELBOW_ID, BODY_RIGHT_FOOT_ID, BODY_RIGHT_KNEE_ID, HAND_LEFT_ID,
 };
 use alvr_session::HeadsetConfig;
-use std::{
-    collections::HashMap,
-    f32::consts::{FRAC_PI_2, PI},
-};
+use std::f32::consts::{FRAC_PI_2, PI};
 
 const DEG_TO_RAD: f32 = PI / 180.0;
+
+pub static BODY_TRACKER_IDS: Lazy<[u64; 8]> = Lazy::new(|| {
+    [
+        // Upper body
+        *BODY_CHEST_ID,
+        *BODY_HIPS_ID,
+        *BODY_LEFT_ELBOW_ID,
+        *BODY_RIGHT_ELBOW_ID,
+        // Legs
+        *BODY_LEFT_KNEE_ID,
+        *BODY_LEFT_FOOT_ID,
+        *BODY_RIGHT_KNEE_ID,
+        *BODY_RIGHT_FOOT_ID,
+    ]
+});
 
 fn to_ffi_quat(quat: Quat) -> FfiQuat {
     FfiQuat {
@@ -20,6 +32,16 @@ fn to_ffi_quat(quat: Quat) -> FfiQuat {
         y: quat.y,
         z: quat.z,
         w: quat.w,
+    }
+}
+
+pub fn to_ffi_motion(device_id: u64, motion: DeviceMotion) -> FfiDeviceMotion {
+    FfiDeviceMotion {
+        deviceID: device_id,
+        orientation: to_ffi_quat(motion.pose.orientation),
+        position: motion.pose.position.to_array(),
+        linearVelocity: motion.linear_velocity.to_array(),
+        angularVelocity: motion.angular_velocity.to_array(),
     }
 }
 
@@ -56,11 +78,28 @@ fn get_hand_skeleton_offsets(config: &HeadsetConfig) -> (Pose, Pose) {
     (left_offset, right_offset)
 }
 
-pub fn to_openvr_hand_skeleton(
+fn to_ffi_skeleton(skeleton: [Pose; 31]) -> FfiHandSkeleton {
+    FfiHandSkeleton {
+        jointRotations: skeleton
+            .iter()
+            .map(|j| to_ffi_quat(j.orientation))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+        jointPositions: skeleton
+            .iter()
+            .map(|j| j.position.to_array())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+    }
+}
+
+pub fn to_openvr_ffi_hand_skeleton(
     config: &HeadsetConfig,
     device_id: u64,
     hand_skeleton: [Pose; 26],
-) -> [Pose; 31] {
+) -> FfiHandSkeleton {
     let (left_hand_skeleton_offset, right_hand_skeleton_offset) = get_hand_skeleton_offsets(config);
     let id = device_id;
 
@@ -150,7 +189,7 @@ pub fn to_openvr_hand_skeleton(
         position: gj[1].position,
     };
 
-    [
+    let skeleton = [
         // Palm. NB: this is ignored by SteamVR
         Pose {
             orientation: gj[0].orientation * pose_offset.orientation,
@@ -194,67 +233,7 @@ pub fn to_openvr_hand_skeleton(
         aux_orientation(id, root_parented_pose(gj[14])),
         aux_orientation(id, root_parented_pose(gj[19])),
         aux_orientation(id, root_parented_pose(gj[24])),
-    ]
-}
+    ];
 
-pub fn to_ffi_motion(device_id: u64, motion: DeviceMotion) -> FfiDeviceMotion {
-    FfiDeviceMotion {
-        deviceID: device_id,
-        orientation: to_ffi_quat(motion.pose.orientation),
-        position: motion.pose.position.to_array(),
-        linearVelocity: motion.linear_velocity.to_array(),
-        angularVelocity: motion.angular_velocity.to_array(),
-    }
-}
-
-pub fn to_ffi_skeleton(skeleton: [Pose; 31]) -> FfiHandSkeleton {
-    FfiHandSkeleton {
-        jointRotations: skeleton
-            .iter()
-            .map(|j| to_ffi_quat(j.orientation))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-        jointPositions: skeleton
-            .iter()
-            .map(|j| j.position.to_array())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-    }
-}
-
-pub fn to_ffi_body_trackers(
-    device_motions: &[(u64, DeviceMotion)],
-    tracking: bool,
-) -> Option<Vec<FfiBodyTracker>> {
-    static BODY_TRACKER_ID_MAP: Lazy<HashMap<u64, u32>> = Lazy::new(|| {
-        HashMap::from([
-            // Upper body
-            (*BODY_CHEST_ID, 0),
-            (*BODY_HIPS_ID, 1),
-            (*BODY_LEFT_ELBOW_ID, 2),
-            (*BODY_RIGHT_ELBOW_ID, 3),
-            // Legs
-            (*BODY_LEFT_KNEE_ID, 4),
-            (*BODY_LEFT_FOOT_ID, 5),
-            (*BODY_RIGHT_KNEE_ID, 6),
-            (*BODY_RIGHT_FOOT_ID, 7),
-        ])
-    });
-
-    let mut trackers = vec![];
-
-    for (id, motion) in device_motions {
-        if BODY_TRACKER_ID_MAP.contains_key(id) {
-            trackers.push(FfiBodyTracker {
-                trackerID: *BODY_TRACKER_ID_MAP.get(id).unwrap(),
-                orientation: to_ffi_quat(motion.pose.orientation),
-                position: motion.pose.position.to_array(),
-                tracking: tracking.into(),
-            });
-        }
-    }
-
-    Some(trackers)
+    to_ffi_skeleton(skeleton)
 }

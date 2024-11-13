@@ -1,6 +1,6 @@
 use crate::{
     extra_extensions::{
-        BodyTrackerFB, EyeTrackerSocial, FaceTracker2FB, FacialTrackerHTC,
+        self, BodyTrackerFB, EyeTrackerSocial, FaceTracker2FB, FacialTrackerHTC,
         BODY_JOINT_SET_FULL_BODY_META, FULL_BODY_JOINT_COUNT_META,
         FULL_BODY_JOINT_LEFT_FOOT_BALL_META, FULL_BODY_JOINT_LEFT_LOWER_LEG_META,
         FULL_BODY_JOINT_RIGHT_FOOT_BALL_META, FULL_BODY_JOINT_RIGHT_LOWER_LEG_META,
@@ -8,11 +8,13 @@ use crate::{
     Platform, XrContext,
 };
 use alvr_common::{glam::Vec3, *};
-use alvr_packets::{ButtonEntry, ButtonValue};
+use alvr_packets::{ButtonEntry, ButtonValue, ViewParams};
 use alvr_session::{BodyTrackingSourcesConfig, FaceTrackingSourcesConfig};
 use openxr as xr;
 use std::collections::HashMap;
 use xr::SpaceLocationFlags;
+
+const IPD_CHANGE_EPS: f32 = 0.001;
 
 pub enum ButtonAction {
     Binary(xr::Action<bool>),
@@ -61,25 +63,26 @@ pub fn initialize_interaction(
     #[cfg(target_os = "android")]
     if let Some(config) = &face_tracking_sources {
         if (config.combined_eye_gaze || config.eye_tracking_fb)
-            && matches!(platform, Platform::Quest3 | Platform::QuestPro)
+            && matches!(platform, Platform::QuestPro)
         {
-            alvr_client_core::try_get_permission("com.oculus.permission.EYE_TRACKING")
+            alvr_system_info::try_get_permission("com.oculus.permission.EYE_TRACKING")
         }
-        if config.combined_eye_gaze && matches!(platform, Platform::Pico4 | Platform::PicoNeo3) {
-            alvr_client_core::try_get_permission("com.picovr.permission.EYE_TRACKING")
+        if config.combined_eye_gaze && platform.is_pico() {
+            alvr_system_info::try_get_permission("com.picovr.permission.EYE_TRACKING")
         }
-        if config.face_tracking_fb && matches!(platform, Platform::Quest3 | Platform::QuestPro) {
-            alvr_client_core::try_get_permission("android.permission.RECORD_AUDIO");
-            alvr_client_core::try_get_permission("com.oculus.permission.FACE_TRACKING")
+        if config.face_tracking_fb && matches!(platform, Platform::QuestPro) {
+            alvr_system_info::try_get_permission("android.permission.RECORD_AUDIO");
+            alvr_system_info::try_get_permission("com.oculus.permission.FACE_TRACKING")
         }
     }
 
     #[cfg(target_os = "android")]
     if let Some(config) = &body_tracking_sources {
         if (config.body_tracking_fb.enabled())
-            && matches!(platform, Platform::Quest3 | Platform::QuestPro)
+            && platform.is_quest()
+            && platform != Platform::Quest1
         {
-            alvr_client_core::try_get_permission("com.oculus.permission.BODY_TRACKING")
+            alvr_system_info::try_get_permission("com.oculus.permission.BODY_TRACKING")
         }
     }
 
@@ -95,16 +98,10 @@ pub fn initialize_interaction(
     }
 
     let controllers_profile_path = match platform {
-        Platform::Quest1
-        | Platform::Quest2
-        | Platform::Quest3
-        | Platform::QuestPro
-        | Platform::QuestUnknown => QUEST_CONTROLLER_PROFILE_PATH, // todo: create new controller profile for quest pro and 3
+        p if p.is_quest() => QUEST_CONTROLLER_PROFILE_PATH, // todo: create new controller profile for quest pro and 3
         Platform::PicoNeo3 => PICO_NEO3_CONTROLLER_PROFILE_PATH,
-        Platform::Pico4 => PICO4_CONTROLLER_PROFILE_PATH,
-        Platform::Focus3 | Platform::XRElite | Platform::ViveUnknown => {
-            FOCUS3_CONTROLLER_PROFILE_PATH
-        }
+        p if p.is_pico() => PICO4_CONTROLLER_PROFILE_PATH,
+        p if p.is_vive() => FOCUS3_CONTROLLER_PROFILE_PATH,
         Platform::Yvr => YVR_CONTROLLER_PROFILE_PATH,
         _ => QUEST_CONTROLLER_PROFILE_PATH,
     };
@@ -200,22 +197,16 @@ pub fn initialize_interaction(
     // Note: We cannot enable multimodal if fb body tracking is active. It would result in a
     // ERROR_RUNTIME_FAILURE crash.
     let uses_multimodal_hands = prefer_multimodal_input
-        && xr_ctx
-            .extra_extensions
-            .supports_simultaneous_hands_and_controllers(&xr_ctx.instance, xr_ctx.system)
         && !body_tracking_sources
             .as_ref()
             .map(|s| s.body_tracking_fb.enabled())
-            .unwrap_or(false);
+            .unwrap_or(false)
+        && extra_extensions::resume_simultaneous_hands_and_controllers_tracking(&xr_ctx.session)
+            .is_ok();
 
     let left_detached_controller_pose_action;
     let right_detached_controller_pose_action;
     if uses_multimodal_hands {
-        xr_ctx
-            .extra_extensions
-            .resume_simultaneous_hands_and_controllers_tracking(&xr_ctx.session)
-            .ok();
-
         // Note: when multimodal input is enabled, both controllers and hands will always be active.
         // To be able to detect when controllers are actually held, we have to register detached
         // controllers pose; the controller pose will be diverted to the detached controllers when
@@ -257,155 +248,124 @@ pub fn initialize_interaction(
         )
         .unwrap();
 
-    let combined_eyes_source = (face_tracking_sources
+    let combined_eyes_source = face_tracking_sources
         .as_ref()
         .map(|s| s.combined_eye_gaze)
         .unwrap_or(false)
-        && xr_ctx
-            .extra_extensions
-            .supports_eye_gaze_interaction(&xr_ctx.instance, xr_ctx.system))
-    .then(|| {
-        let action = action_set
-            .create_action("combined_eye_gaze", "Combined eye gaze", &[])
-            .unwrap();
+        .then(|| {
+            let action = action_set
+                .create_action("combined_eye_gaze", "Combined eye gaze", &[])
+                .unwrap();
 
-        xr_ctx
-            .instance
-            .suggest_interaction_profile_bindings(
+            let res = xr_ctx.instance.suggest_interaction_profile_bindings(
                 xr_ctx
                     .instance
                     .string_to_path("/interaction_profiles/ext/eye_gaze_interaction")
                     .unwrap(),
                 &[binding(&action, "/user/eyes_ext/input/gaze_ext/pose")],
-            )
-            .unwrap();
+            );
+            if res.is_err() {
+                warn!("Failed to register combined eye gaze input: {res:?}");
+            }
 
-        let space = action
-            .create_space(&xr_ctx.session, xr::Path::NULL, xr::Posef::IDENTITY)
-            .unwrap();
+            let space = action
+                .create_space(xr_ctx.session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
+                .unwrap();
 
-        (action, space)
-    });
+            Some((action, space))
+        })
+        .flatten();
 
     xr_ctx.session.attach_action_sets(&[&action_set]).unwrap();
 
     let left_grip_space = left_grip_action
-        .create_space(&xr_ctx.session, xr::Path::NULL, xr::Posef::IDENTITY)
+        .create_space(xr_ctx.session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
         .unwrap();
     let right_grip_space = right_grip_action
-        .create_space(&xr_ctx.session, xr::Path::NULL, xr::Posef::IDENTITY)
+        .create_space(xr_ctx.session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
         .unwrap();
 
     let left_aim_space = left_aim_action
-        .create_space(&xr_ctx.session, xr::Path::NULL, xr::Posef::IDENTITY)
+        .create_space(xr_ctx.session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
         .unwrap();
     let right_aim_space = right_aim_action
-        .create_space(&xr_ctx.session, xr::Path::NULL, xr::Posef::IDENTITY)
+        .create_space(xr_ctx.session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
         .unwrap();
 
-    let (left_hand_tracker, right_hand_tracker) =
-        if xr_ctx.instance.exts().ext_hand_tracking.is_some()
-            && xr_ctx
-                .instance
-                .supports_hand_tracking(xr_ctx.system)
-                .unwrap()
-        {
-            (
-                Some(xr_ctx.session.create_hand_tracker(xr::Hand::LEFT).unwrap()),
-                Some(xr_ctx.session.create_hand_tracker(xr::Hand::RIGHT).unwrap()),
-            )
-        } else {
-            (None, None)
-        };
+    fn create_ext_object<T>(
+        name: &str,
+        enabled: Option<bool>,
+        create_cb: impl FnOnce() -> xr::Result<T>,
+    ) -> Option<T> {
+        enabled
+            .unwrap_or(false)
+            .then(|| match create_cb() {
+                Ok(obj) => Some(obj),
+                Err(xr::sys::Result::ERROR_FEATURE_UNSUPPORTED) => {
+                    warn!("Cannot create unsupported {name}");
+                    None
+                }
+                Err(xr::sys::Result::ERROR_EXTENSION_NOT_PRESENT) => None,
+                Err(e) => {
+                    warn!("Failed to create {name}: {e}");
+                    None
+                }
+            })
+            .flatten()
+    }
 
-    let eye_tracker_fb = (face_tracking_sources
-        .as_ref()
-        .map(|s| s.eye_tracking_fb)
-        .unwrap_or(false)
-        && xr_ctx
-            .extra_extensions
-            .supports_social_eye_tracking(&xr_ctx.instance, xr_ctx.system))
-    .then(|| {
-        xr_ctx
-            .extra_extensions
-            .create_eye_tracker_social(&xr_ctx.session)
-            .unwrap()
+    let left_hand_tracker = create_ext_object("HandTracker (left)", Some(true), || {
+        xr_ctx.session.create_hand_tracker(xr::Hand::LEFT)
+    });
+    let right_hand_tracker = create_ext_object("HandTracker (right)", Some(true), || {
+        xr_ctx.session.create_hand_tracker(xr::Hand::RIGHT)
     });
 
-    let face_tracker_fb = (face_tracking_sources
-        .as_ref()
-        .map(|s| s.face_tracking_fb)
-        .unwrap_or(false)
-        && xr_ctx
-            .extra_extensions
-            .supports_fb_visual_face_tracking(&xr_ctx.instance, xr_ctx.system)
-        && xr_ctx
-            .extra_extensions
-            .supports_fb_audio_face_tracking(&xr_ctx.instance, xr_ctx.system))
-    .then(|| {
-        xr_ctx
-            .extra_extensions
-            .create_face_tracker2_fb(&xr_ctx.session, true, true)
-            .unwrap()
+    let eye_tracker_fb = create_ext_object(
+        "EyeTrackerSocial",
+        face_tracking_sources.as_ref().map(|s| s.eye_tracking_fb),
+        || EyeTrackerSocial::new(&xr_ctx.session),
+    );
+
+    let face_tracker_fb = create_ext_object(
+        "FaceTracker2FB",
+        face_tracking_sources.as_ref().map(|s| s.face_tracking_fb),
+        || FaceTracker2FB::new(&xr_ctx.session, true, true),
+    );
+
+    let eye_tracker_htc = create_ext_object(
+        "FacialTrackerHTC (eyes)",
+        face_tracking_sources
+            .as_ref()
+            .map(|s| s.eye_expressions_htc),
+        || FacialTrackerHTC::new(&xr_ctx.session, xr::FacialTrackingTypeHTC::EYE_DEFAULT),
+    );
+
+    let lip_tracker_htc = create_ext_object(
+        "FacialTrackerHTC (lips)",
+        face_tracking_sources
+            .as_ref()
+            .map(|s| s.lip_expressions_htc),
+        || FacialTrackerHTC::new(&xr_ctx.session, xr::FacialTrackingTypeHTC::LIP_DEFAULT),
+    );
+
+    let body_tracker_fb = create_ext_object(
+        "BodyTrackerFB (full set)",
+        body_tracking_sources
+            .clone()
+            .and_then(|s| s.body_tracking_fb.into_option())
+            .map(|c| c.full_body),
+        || BodyTrackerFB::new(&xr_ctx.session, *BODY_JOINT_SET_FULL_BODY_META),
+    )
+    .map(|tracker| (tracker, FULL_BODY_JOINT_COUNT_META))
+    .or_else(|| {
+        create_ext_object(
+            "BodyTrackerFB (default set)",
+            body_tracking_sources.map(|s| s.body_tracking_fb.enabled()),
+            || BodyTrackerFB::new(&xr_ctx.session, xr::BodyJointSetFB::DEFAULT),
+        )
+        .map(|tracker| (tracker, xr::BodyJointFB::COUNT.into_raw() as usize))
     });
-
-    let eye_tracker_htc = (face_tracking_sources
-        .as_ref()
-        .map(|s| s.eye_expressions_htc)
-        .unwrap_or(false)
-        && xr_ctx
-            .extra_extensions
-            .supports_htc_eye_facial_tracking(&xr_ctx.instance, xr_ctx.system))
-    .then(|| {
-        xr_ctx
-            .extra_extensions
-            .create_facial_tracker_htc(&xr_ctx.session, xr::FacialTrackingTypeHTC::EYE_DEFAULT)
-            .unwrap()
-    });
-
-    let lip_tracker_htc = (face_tracking_sources
-        .map(|s| s.lip_expressions_htc)
-        .unwrap_or(false)
-        && xr_ctx
-            .extra_extensions
-            .supports_htc_lip_facial_tracking(&xr_ctx.instance, xr_ctx.system))
-    .then(|| {
-        xr_ctx
-            .extra_extensions
-            .create_facial_tracker_htc(&xr_ctx.session, xr::FacialTrackingTypeHTC::LIP_DEFAULT)
-            .unwrap()
-    });
-
-    let body_tracker_fb = if let Some(body_tracking_fb) =
-        body_tracking_sources.and_then(|s| s.body_tracking_fb.into_option())
-    {
-        if body_tracking_fb.full_body
-            && xr_ctx
-                .extra_extensions
-                .supports_full_body_tracking_meta(&xr_ctx.instance, xr_ctx.system)
-        {
-            let tracker = xr_ctx
-                .extra_extensions
-                .create_body_tracker_fb(&xr_ctx.session, *BODY_JOINT_SET_FULL_BODY_META)
-                .unwrap();
-
-            Some((tracker, FULL_BODY_JOINT_COUNT_META))
-        } else if xr_ctx
-            .extra_extensions
-            .supports_body_tracking_fb(&xr_ctx.instance, xr_ctx.system)
-        {
-            let tracker = xr_ctx
-                .extra_extensions
-                .create_body_tracker_fb(&xr_ctx.session, xr::BodyJointSetFB::DEFAULT)
-                .unwrap();
-
-            Some((tracker, xr::BodyJointFB::COUNT.into_raw() as usize))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
 
     InteractionContext {
         action_set,
@@ -449,6 +409,76 @@ pub fn get_reference_space(
     xr_session
         .create_reference_space(ty, xr::Posef::IDENTITY)
         .unwrap()
+}
+
+pub fn get_head_data(
+    xr_session: &xr::Session<xr::OpenGlEs>,
+    reference_space: &xr::Space,
+    time: xr::Time,
+    last_ipd_m: &mut f32,
+) -> Option<(DeviceMotion, Option<[ViewParams; 2]>)> {
+    let (head_location, head_velocity) = xr_session
+        .create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)
+        .ok()?
+        .relate(&reference_space, time)
+        .ok()?;
+
+    if !head_location
+        .location_flags
+        .contains(xr::SpaceLocationFlags::ORIENTATION_VALID)
+    {
+        return None;
+    }
+
+    let (view_flags, views) = xr_session
+        .locate_views(
+            xr::ViewConfigurationType::PRIMARY_STEREO,
+            time,
+            &reference_space,
+        )
+        .ok()?;
+
+    if !view_flags.contains(xr::ViewStateFlags::POSITION_VALID)
+        || !view_flags.contains(xr::ViewStateFlags::ORIENTATION_VALID)
+    {
+        return None;
+    }
+
+    let motion = DeviceMotion {
+        pose: crate::from_xr_pose(head_location.pose),
+        linear_velocity: head_velocity
+            .velocity_flags
+            .contains(xr::SpaceVelocityFlags::LINEAR_VALID)
+            .then(|| crate::from_xr_vec3(head_velocity.linear_velocity))
+            .unwrap_or_default(),
+        angular_velocity: head_velocity
+            .velocity_flags
+            .contains(xr::SpaceVelocityFlags::ANGULAR_VALID)
+            .then(|| crate::from_xr_vec3(head_velocity.angular_velocity))
+            .unwrap_or_default(),
+    };
+
+    let ipd_m = (crate::from_xr_vec3(views[1].pose.position)
+        - crate::from_xr_vec3(views[0].pose.position))
+    .length();
+    let view_params = if f32::abs(ipd_m - *last_ipd_m) > IPD_CHANGE_EPS {
+        *last_ipd_m = ipd_m;
+
+        Some([
+            ViewParams {
+                pose: motion.pose.inverse() * crate::from_xr_pose(views[0].pose),
+                fov: crate::from_xr_fov(views[0].fov),
+            },
+            ViewParams {
+                pose: motion.pose.inverse() * crate::from_xr_pose(views[1].pose),
+                fov: crate::from_xr_fov(views[1].fov),
+            },
+        ])
+    } else {
+        None
+    };
+
+    Some((motion, view_params))
 }
 
 pub fn get_hand_data(
