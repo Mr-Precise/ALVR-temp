@@ -8,6 +8,8 @@
 * **Bugs from this fork should be reported** [**here**](https://github.com/Mr-Precise/ALVR-temp/issues), not to the original author.
 * Original author [**alvr-org/ALVR**](https://github.com/alvr-org/ALVR)  
 
+### 2025: I don't have a VR headset anymore. No VR - No updates.
+
 ---
 
 Stream VR games from your PC to your headset via Wi-Fi.  
