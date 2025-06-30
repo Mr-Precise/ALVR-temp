@@ -2,13 +2,17 @@
 
 # ALVR - Air Light VR
 
-[![badge-discord][]][link-discord] [![badge-matrix][]][link-matrix] [![badge-opencollective][]][link-opencollective]
+* This is a **Fork** ALVR for experiments on linux, backport to Ubuntu 20.04 and custom build with latest ffmpeg and Vulkan
+* **Bugs from this fork should be reported** [**here**](https://github.com/Mr-Precise/ALVR-temp/issues), not to the original author.
+* Original author [**alvr-org/ALVR**](https://github.com/alvr-org/ALVR)  
+
+---
 
 Stream VR games from your PC to your headset via Wi-Fi.
 This is a fork of [ALVR](https://github.com/polygraphene/ALVR).
 
 ### Direct download to the latest version:
-### [Windows Launcher](https://github.com/alvr-org/ALVR/releases/latest/download/alvr_launcher_windows.zip) | [Linux Launcher](https://github.com/alvr-org/ALVR/releases/latest/download/alvr_launcher_linux.tar.gz)
+### [Windows Launcher](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_launcher_windows.zip) | [Linux Launcher](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_launcher_linux.tar.gz)
 
 ## Compatibility
 
