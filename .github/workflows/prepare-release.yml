@@ -1,53 +1,35 @@
-name: Create release
+name: Release custom
 
 env:
   CARGO_TERM_COLOR: always
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version"
-        required: false
-        default: ""
 
 jobs:
   prepare_release:
     runs-on: windows-2019
     outputs:
-      release_ref: ${{ steps.output_ref.outputs.release_ref }}
+      release_ref: ${{ steps.gen_tag.outputs.release_ref }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       release_id: ${{ steps.create_release.outputs.id }}
     steps:
-      - name: Configure git
-        run: git config --global core.autocrlf false
-
-      - uses: actions/checkout@v2
-
+      - uses: actions/checkout@v4
+        with:
+          repository: "Mr-Precise/ALVR-temp"
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
 
-      - name: Bump version
-        id: bump_version
+      - name: Generate tag, set release ref
+        id: gen_tag
         env:
           RUST_BACKTRACE: 1
         run: |
-          $versionarg = "${{ github.event.inputs.version }}"
-          $versionarg = If ($versionarg.Length -gt 0) { "--version $versionarg" } else { "" }
-          $out = cargo xtask bump $versionarg.split()
+          $out = cargo xtask bump --nightly
           echo $out
-          cargo update -p alvr_common
           echo "::set-output name=version_tag::$(echo $out | sls -CaseSensitive -Pattern '^v.*$')"
-
-      - name: Push changes
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "[Auto] Bump version"
-
-      - name: Output ref for later checkouts
-        id: output_ref
-        run: echo "::set-output name=release_ref::$(git rev-parse HEAD)"
+          echo "::set-output name=release_ref::$(git rev-parse HEAD)"
 
       - name: Create Release
         id: create_release
@@ -55,13 +37,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.bump_version.outputs.version_tag }}
-          release_name: ALVR ${{ steps.bump_version.outputs.version_tag }}
+          # Release tag is taken from the gen_tag job.
+          tag_name: ${{ steps.gen_tag.outputs.version_tag }}
+          release_name: ALVR ${{ steps.gen_tag.outputs.version_tag }}
+          # TODO: gather commit messages to post here in the body
+          body: |
+            Custom release of ALVR: ${{ steps.gen_tag.outputs.version_tag }}
           draft: true
           prerelease: false
-          commitish: ${{ steps.output_ref.outputs.release_ref }}
 
   build_windows_streamer:
+    # Windows latest has Rust, Android NDK and LLVM already installed.
+    # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md
     runs-on: windows-2019
     needs: [prepare_release]
     env:
@@ -69,11 +56,11 @@ jobs:
       # This is specific to the GitHub windows-2019 runner.
       LIBCLANG_PATH: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Tools\Llvm\x64\bin'
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
+          repository: "Mr-Precise/ALVR-temp"
           ref: ${{ needs.prepare_release.outputs.release_ref }}
           submodules: true
-
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -81,17 +68,38 @@ jobs:
 
       - uses: crazy-max/ghaction-chocolatey@v1
         with:
-          args: install zip unzip pkgconfiglite wixtoolset
+          args: install zip unzip pkgconfiglite
 
       - name: Build and package ALVR
         id: build
         env:
           RUST_BACKTRACE: 1
         run: |
+          cargo xtask bump --nightly
           cargo xtask package-streamer --gpl --ci
-          cargo xtask package-launcher --ci
+          $file = Get-ChildItem -Name .\build\*.exe | Select-Object -f 1
+          echo "::set-output name=exe_filename::$file"
 
-      - name: Upload streamer
+      # Upload artifacts
+      # - name: Upload installer (exe)
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ needs.prepare_release.outputs.upload_url }}
+      #     asset_path: ./build/${{ steps.build.outputs.exe_filename }}
+      #     asset_name: ${{ steps.build.outputs.exe_filename }}
+      #     asset_content_type: application/octet-stream
+      # - name: Upload installer (msi)
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ needs.prepare_release.outputs.upload_url }}
+      #     asset_path: ./build/alvr_streamer_windows.msi
+      #     asset_name: alvr_streamer_windows.msi
+      #     asset_content_type: application/octet-stream
+      - name: Upload portable streamer (zip)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,55 +108,35 @@ jobs:
           asset_path: ./build/alvr_streamer_windows.zip
           asset_name: alvr_streamer_windows.zip
           asset_content_type: application/zip
-      - name: Upload launcher
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare_release.outputs.upload_url }}
-          asset_path: ./build/alvr_launcher_windows.zip
-          asset_name: alvr_launcher_windows.zip
-          asset_content_type: application/zip
 
   build_linux_streamer:
     runs-on: ubuntu-22.04
     needs: [prepare_release]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
+          repository: "Mr-Precise/ALVR-temp"
           ref: ${{ needs.prepare_release.outputs.release_ref }}
           submodules: true
-
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
 
-      - name: Add Lunarg repository key
-        run: wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
-
-      - name: Add Lunarg repository
-        run: sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-
-      - name: Build and install dependencies
+      - name: Build dependencies and package ALVR
         env:
           RUST_BACKTRACE: 1
         run: |
           sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 25088A0359807596
           echo "deb http://ppa.launchpad.net/pipewire-debian/pipewire-upstream/ubuntu $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list.d/pipewire-upstream.list
+          sudo add-apt-repository universe
           sudo apt-get update
           sudo apt-get install libfuse2 build-essential pkg-config nasm libva-dev libdrm-dev libvulkan-dev libx264-dev libx265-dev cmake libasound2-dev libjack-jackd2-dev libxrandr-dev libunwind-dev libffmpeg-nvenc-dev nvidia-cuda-toolkit libgtk-3-dev libpipewire-0.3-dev libspa-0.2-dev vulkan-sdk
           cp alvr/xtask/deb/cuda.pc /usr/share/pkgconfig
-
-      - name: Build and package ALVR (.tar.gz)
-        id: build
-        env:
-          RUST_BACKTRACE: 1
-        run: |
+          cargo xtask bump --nightly
           cargo xtask package-streamer --gpl --ci
-          cargo xtask package-launcher --ci
 
-      - name: Upload streamer (tar.gz)
+      - name: Upload linux streamer
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -157,25 +145,16 @@ jobs:
           asset_path: ./build/alvr_streamer_linux.tar.gz
           asset_name: alvr_streamer_linux.tar.gz
           asset_content_type: application/gzip
-      - name: Upload launcher
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare_release.outputs.upload_url }}
-          asset_path: ./build/alvr_launcher_linux.tar.gz
-          asset_name: alvr_launcher_linux.tar.gz
-          asset_content_type: application/gzip
 
   build_android_client:
     runs-on: ubuntu-latest
     needs: [prepare_release]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
+          repository: "Mr-Precise/ALVR-temp"
           ref: ${{ needs.prepare_release.outputs.release_ref }}
           submodules: true
-        
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -194,13 +173,15 @@ jobs:
           ndk-version: r26b
 
       - name: Build and package ALVR
-        id: build
         env:
           RUST_BACKTRACE: 1
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: cargo xtask package-client --ci
+        run: |
+          cargo xtask bump --nightly
+          cargo xtask package-client --ci
+          cargo xtask package-client-lib
 
-      - name: Sign APK
+      - name: Sign apk
         uses: ilharp/sign-android-release@v1
         id: sign_apk
         with:
@@ -211,7 +192,7 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
           buildToolsVersion: 34.0.0
 
-      - name: Upload APK
+      - name: Upload apk
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -220,3 +201,28 @@ jobs:
           asset_path: ${{ steps.sign_apk.outputs.signedFile }}
           asset_name: alvr_client_android.apk
           asset_content_type: application/vnd.android.package-archive
+      - name: Upload client library
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.prepare_release.outputs.upload_url }}
+          asset_path: ./build/alvr_client_core.zip
+          asset_name: alvr_client_core.zip
+          asset_content_type: application/zip
+
+  publish_release:
+    runs-on: ubuntu-latest
+    needs:
+      [
+        prepare_release,
+        build_windows_streamer,
+        build_linux_streamer,
+        build_android_client,
+      ]
+    steps:
+      - uses: eregon/publish-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ needs.prepare_release.outputs.release_id }}
