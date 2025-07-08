@@ -11,7 +11,6 @@ use alvr_common::{
     ConnectionError, ToAny,
     anyhow::{self, Context, Result, anyhow, bail},
     info,
-    once_cell::sync::Lazy,
     parking_lot::Mutex,
 };
 use alvr_session::{AudioBufferingConfig, CustomAudioDeviceConfig, MicrophoneDevicesConfig};
@@ -23,18 +22,18 @@ use cpal::{
 use rodio::{OutputStream, Source};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{Arc, LazyLock},
     thread,
     time::Duration,
 };
 
-static VIRTUAL_MICROPHONE_PAIRS: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
+static VIRTUAL_MICROPHONE_PAIRS: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     [
+        ("Line 1", "Line 1"),
         ("CABLE Input", "CABLE Output"),
         ("VoiceMeeter Input", "VoiceMeeter Output"),
         ("VoiceMeeter Aux Input", "VoiceMeeter Aux Output"),
         ("VoiceMeeter VAIO3 Input", "VoiceMeeter VAIO3 Output"),
-        ("Virtual Cable 1", "Virtual Cable 2"),
     ]
     .into_iter()
     .collect()
@@ -59,21 +58,18 @@ fn device_from_custom_config(host: &Host, config: &CustomAudioDeviceConfig) -> R
     })
 }
 
+// Input and output devices may have the same name.
 fn microphone_pair_from_sink_name(host: &Host, sink_name: &str) -> Result<(Device, Device)> {
     let sink = host
         .output_devices()?
         .find(|d| d.name().unwrap_or_default().contains(sink_name))
-        .context("VB-CABLE or Voice Meeter not found. Please install or reinstall either one")?;
+        .context("Virtual Audio Cable, VB-CABLE or VoiceMeeter not found. Please install or reinstall one")?;
 
     if let Some(source_name) = VIRTUAL_MICROPHONE_PAIRS.get(sink_name) {
         Ok((
             sink,
             host.input_devices()?
-                .find(|d| {
-                    d.name()
-                        .map(|name| name.contains(source_name))
-                        .unwrap_or(false)
-                })
+                .find(|d| d.name().unwrap_or_default().contains(source_name))
                 .context("Matching output microphone not found. Did you rename it?")?,
         ))
     } else {
@@ -137,9 +133,7 @@ impl AudioDevice {
 
                 pair?
             }
-            MicrophoneDevicesConfig::VAC => {
-                microphone_pair_from_sink_name(&host, "Virtual Cable 1")?
-            }
+            MicrophoneDevicesConfig::VAC => microphone_pair_from_sink_name(&host, "Line 1")?,
             MicrophoneDevicesConfig::VBCable => {
                 microphone_pair_from_sink_name(&host, "CABLE Input")?
             }

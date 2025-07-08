@@ -1,5 +1,5 @@
 use crate::{
-    ConnectionContext, FILESYSTEM_LAYOUT, SESSION_MANAGER, ServerCoreEvent, ViewsConfig,
+    ConnectionContext, FILESYSTEM_LAYOUT, SESSION_MANAGER, ServerCoreEvent,
     bitrate::BitrateManager,
     hand_gestures::HandGestureManager,
     input_mapping::ButtonMappingManager,
@@ -10,8 +10,8 @@ use crate::{
 use alvr_adb::{WiredConnection, WiredConnectionStatus};
 use alvr_common::{
     AnyhowToCon, BUTTON_INFO, CONTROLLER_PROFILE_INFO, ConResult, ConnectionError, ConnectionState,
-    LifecycleState, Pose, QUEST_CONTROLLER_PROFILE_PATH, con_bail, dbg_connection, debug, error,
-    glam::{Quat, UVec2, Vec2, Vec3},
+    LifecycleState, QUEST_CONTROLLER_PROFILE_PATH, con_bail, dbg_connection, debug, error,
+    glam::{UVec2, Vec2},
     info,
     parking_lot::{Condvar, Mutex, RwLock},
     settings_schema::Switch,
@@ -20,8 +20,9 @@ use alvr_common::{
 use alvr_events::{AdbEvent, ButtonEvent, EventType};
 use alvr_packets::{
     AUDIO, ClientConnectionResult, ClientControlPacket, ClientListAction, ClientStatistics,
-    HAPTICS, NegotiatedStreamingConfig, RealTimeConfig, ReservedClientControlPacket, STATISTICS,
-    ServerControlPacket, TRACKING, Tracking, VIDEO, VideoPacketHeader,
+    HAPTICS, NegotiatedStreamingConfig, NegotiatedStreamingConfigExt, RealTimeConfig,
+    ReservedClientControlPacket, STATISTICS, ServerControlPacket, StreamConfigPacket, TRACKING,
+    TrackingData, VIDEO, VideoPacketHeader,
 };
 use alvr_session::{
     BodyTrackingBDConfig, BodyTrackingSinkConfig, CodecType, ControllersEmulationMode, FrameSize,
@@ -573,9 +574,7 @@ fn connection_pipeline(
         return Ok(());
     };
 
-    let streaming_caps = if let Some(streaming_caps) = maybe_streaming_caps {
-        alvr_packets::decode_video_streaming_capabilities(&streaming_caps).to_con()?
-    } else {
+    let Some(streaming_caps) = maybe_streaming_caps else {
         con_bail!("Only streaming clients are supported for now");
     };
 
@@ -620,7 +619,7 @@ fn connection_pipeline(
     let fps = {
         let mut best_match = 0_f32;
         let mut min_diff = f32::MAX;
-        for rate in &streaming_caps.supported_refresh_rates {
+        for rate in &streaming_caps.refresh_rates {
             let diff = (*rate - initial_settings.video.preferred_fps).abs();
             if diff < min_diff {
                 best_match = *rate;
@@ -631,7 +630,7 @@ fn connection_pipeline(
     };
 
     if !streaming_caps
-        .supported_refresh_rates
+        .refresh_rates
         .contains(&initial_settings.video.preferred_fps)
     {
         warn!("Chosen refresh rate not supported. Using {fps}Hz");
@@ -639,7 +638,7 @@ fn connection_pipeline(
 
     let enable_foveated_encoding =
         if let Switch::Enabled(config) = &initial_settings.video.foveated_encoding {
-            let enable = streaming_caps.supports_foveated_encoding || config.force_enable;
+            let enable = streaming_caps.foveated_encoding || config.force_enable;
 
             if !enable {
                 warn!("Foveated encoding is not supported by the client.");
@@ -667,51 +666,29 @@ fn connection_pipeline(
         initial_settings.video.encoder_config.h264_profile
     };
 
-    let mut enable_10_bits_encoding = if initial_settings
+    let mut enable_10_bits_encoding = initial_settings
         .video
         .encoder_config
-        .server_overrides_use_10bit
-    {
-        initial_settings.video.encoder_config.use_10bit
-    } else {
-        streaming_caps.prefer_10bit
-    };
+        .use_10bit
+        .unwrap_or(streaming_caps.prefer_10bit);
 
     if enable_10_bits_encoding && !streaming_caps.encoder_10_bits {
         warn!("10 bits encoding is not supported by the client.");
         enable_10_bits_encoding = false
     }
 
-    let use_full_range = if initial_settings
-        .video
-        .encoder_config
-        .server_overrides_use_full_range
-    {
-        initial_settings.video.encoder_config.use_full_range
-    } else {
-        streaming_caps.prefer_full_range
-    };
-
-    let enable_hdr = if initial_settings
+    let enable_hdr = initial_settings
         .video
         .encoder_config
         .hdr
-        .server_overrides_enable_hdr
-    {
-        initial_settings.video.encoder_config.hdr.enable_hdr
-    } else {
-        streaming_caps.prefer_hdr
-    };
+        .enable
+        .unwrap_or(streaming_caps.prefer_hdr);
 
-    let encoding_gamma = if initial_settings
+    let encoding_gamma = initial_settings
         .video
         .encoder_config
-        .server_overrides_encoding_gamma
-    {
-        initial_settings.video.encoder_config.encoding_gamma
-    } else {
-        streaming_caps.preferred_encoding_gamma
-    };
+        .encoding_gamma
+        .unwrap_or(streaming_caps.preferred_encoding_gamma);
 
     let codec = if initial_settings.video.preferred_codec == CodecType::AV1 {
         let codec = if streaming_caps.encoder_av1 {
@@ -770,19 +747,19 @@ fn connection_pipeline(
     let wired = client_ip.is_loopback();
 
     dbg_connection!("connection_pipeline: send streaming config");
-    let stream_config_packet = alvr_packets::encode_stream_config(
+    let stream_config_packet = StreamConfigPacket::new(
         session_manager_lock.session(),
-        &NegotiatedStreamingConfig {
+        NegotiatedStreamingConfig {
             view_resolution: stream_view_resolution,
             refresh_rate_hint: fps,
             game_audio_sample_rate,
             enable_foveated_encoding,
-            use_multimodal_protocol: streaming_caps.multimodal_protocol,
-            use_full_range,
             encoding_gamma,
             enable_hdr,
             wired,
-        },
+            ext_str: String::new(),
+        }
+        .with_ext(NegotiatedStreamingConfigExt {}),
     )
     .to_con()?;
     proto_socket.send(&stream_config_packet).to_con()?;
@@ -799,7 +776,6 @@ fn connection_pipeline(
     new_openvr_config.enable_foveated_encoding = enable_foveated_encoding;
     new_openvr_config.h264_profile = encoder_profile as _;
     new_openvr_config.use_10bit_encoder = enable_10_bits_encoding;
-    new_openvr_config.use_full_range_encoding = use_full_range;
     new_openvr_config.enable_hdr = enable_hdr;
     new_openvr_config.encoding_gamma = encoding_gamma;
     new_openvr_config.codec = codec as _;
@@ -859,7 +835,7 @@ fn connection_pipeline(
     let mut microphone_receiver: alvr_sockets::StreamReceiver<()> =
         stream_socket.subscribe_to_stream(AUDIO, MAX_UNREAD_PACKETS);
     let tracking_receiver =
-        stream_socket.subscribe_to_stream::<Tracking>(TRACKING, MAX_UNREAD_PACKETS);
+        stream_socket.subscribe_to_stream::<TrackingData>(TRACKING, MAX_UNREAD_PACKETS);
     let haptics_sender = stream_socket.request_stream(HAPTICS);
     let mut statics_receiver =
         stream_socket.subscribe_to_stream::<ClientStatistics>(STATISTICS, MAX_UNREAD_PACKETS);
@@ -870,15 +846,22 @@ fn connection_pipeline(
     *ctx.haptics_sender.lock() = Some(haptics_sender);
 
     let video_send_thread = thread::spawn({
+        let ctx = Arc::clone(&ctx);
         let client_hostname = client_hostname.clone();
         move || {
             while is_streaming(&client_hostname) {
-                let VideoPacket { header, payload } =
-                    match video_channel_receiver.recv_timeout(STREAMING_RECV_TIMEOUT) {
-                        Ok(packet) => packet,
-                        Err(RecvTimeoutError::Timeout) => continue,
-                        Err(RecvTimeoutError::Disconnected) => return,
-                    };
+                let VideoPacket {
+                    mut header,
+                    payload,
+                } = match video_channel_receiver.recv_timeout(STREAMING_RECV_TIMEOUT) {
+                    Ok(packet) => packet,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                };
+
+                ctx.tracking_manager
+                    .read()
+                    .unrecenter_view_params(&mut header.global_view_params);
 
                 let mut buffer = video_sender.get_buffer(&header).unwrap();
                 // todo: make encoder write to socket buffers directly to avoid copy
@@ -1038,7 +1021,6 @@ fn connection_pipeline(
             tracking::tracking_loop(
                 &ctx,
                 initial_settings,
-                streaming_caps.multimodal_protocol,
                 hand_gesture_manager,
                 tracking_receiver,
                 || is_streaming(&client_hostname),
@@ -1204,21 +1186,9 @@ fn connection_pipeline(
                         }
                         ctx.events_sender.send(ServerCoreEvent::RequestIDR).ok();
                     }
-                    ClientControlPacket::ViewsConfig(config) => {
+                    ClientControlPacket::LocalViewParams(params) => {
                         ctx.events_sender
-                            .send(ServerCoreEvent::ViewsConfig(ViewsConfig {
-                                local_view_transforms: [
-                                    Pose {
-                                        position: Vec3::new(-config.ipd_m / 2., 0., 0.),
-                                        orientation: Quat::IDENTITY,
-                                    },
-                                    Pose {
-                                        position: Vec3::new(config.ipd_m / 2., 0., 0.),
-                                        orientation: Quat::IDENTITY,
-                                    },
-                                ],
-                                fov: config.fov,
-                            }))
+                            .send(ServerCoreEvent::LocalViewParams(params))
                             .ok();
                     }
                     ClientControlPacket::Battery(packet) => {

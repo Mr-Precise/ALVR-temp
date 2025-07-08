@@ -15,12 +15,12 @@ use crate::{
 use alvr_common::{
     BODY_CHEST_ID, BODY_HIPS_ID, BODY_LEFT_ELBOW_ID, BODY_LEFT_FOOT_ID, BODY_LEFT_KNEE_ID,
     BODY_RIGHT_ELBOW_ID, BODY_RIGHT_FOOT_ID, BODY_RIGHT_KNEE_ID, ConnectionError,
-    DEVICE_ID_TO_PATH, DeviceMotion, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, Pose,
+    DEVICE_ID_TO_PATH, DeviceMotion, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, Pose, ViewParams,
     glam::{EulerRot, Quat, Vec3},
     parking_lot::Mutex,
 };
 use alvr_events::{EventType, TrackingEvent};
-use alvr_packets::{FaceData, Tracking};
+use alvr_packets::{FaceData, TrackingData};
 use alvr_session::{
     BodyTrackingConfig, HeadsetConfig, PositionRecenteringMode, RotationRecenteringMode, Settings,
     VMCConfig, settings_schema::Switch,
@@ -63,8 +63,8 @@ pub struct TrackingManager {
 impl TrackingManager {
     pub fn new(max_history_size: usize) -> TrackingManager {
         TrackingManager {
-            last_head_pose: Pose::default(),
-            inverse_recentering_origin: Pose::default(),
+            last_head_pose: Pose::IDENTITY,
+            inverse_recentering_origin: Pose::IDENTITY,
             device_motions_history: HashMap::new(),
             hand_skeletons_history: [VecDeque::new(), VecDeque::new()],
             last_face_data: FaceData::default(),
@@ -86,8 +86,7 @@ impl TrackingManager {
                 pos
             }
             PositionRecenteringMode::Local { view_height } => {
-                self.last_head_pose.position
-                    - self.last_head_pose.orientation * Vec3::new(0.0, view_height, 0.0)
+                self.last_head_pose.position - Vec3::new(0.0, view_height, 0.0)
             }
         };
 
@@ -305,14 +304,19 @@ impl TrackingManager {
     pub fn get_face_data(&self) -> &FaceData {
         &self.last_face_data
     }
+
+    pub fn unrecenter_view_params(&self, view_params: &mut [ViewParams; 2]) {
+        for params in view_params {
+            params.pose = self.inverse_recentering_origin.inverse() * params.pose;
+        }
+    }
 }
 
 pub fn tracking_loop(
     ctx: &ConnectionContext,
     initial_settings: Settings,
-    multimodal_protocol: bool,
     hand_gesture_manager: Arc<Mutex<HandGestureManager>>,
-    mut tracking_receiver: StreamReceiver<Tracking>,
+    mut tracking_receiver: StreamReceiver<TrackingData>,
     is_streaming: impl Fn() -> bool,
 ) {
     let mut gestures_button_mapping_manager =
@@ -356,28 +360,14 @@ pub fn tracking_loop(
             Err(ConnectionError::TryAgain(_)) => continue,
             Err(ConnectionError::Other(_)) => return,
         };
-        let Ok(mut tracking) = data.get_header() else {
+        let Ok(tracking) = data.get_header() else {
             return;
         };
 
-        let timestamp = tracking.target_timestamp;
+        let timestamp = tracking.poll_timestamp;
 
         if let Some(stats) = &mut *ctx.statistics_manager.write() {
             stats.report_tracking_received(timestamp);
-        }
-
-        if !multimodal_protocol {
-            if tracking.hand_skeletons[0].is_some() {
-                tracking
-                    .device_motions
-                    .retain(|(id, _)| *id != *HAND_LEFT_ID);
-            }
-
-            if tracking.hand_skeletons[1].is_some() {
-                tracking
-                    .device_motions
-                    .retain(|(id, _)| *id != *HAND_RIGHT_ID);
-            }
         }
 
         let controllers_config = {
@@ -496,7 +486,7 @@ pub fn tracking_loop(
 
         ctx.events_sender
             .send(ServerCoreEvent::Tracking {
-                sample_timestamp: tracking.target_timestamp,
+                poll_timestamp: tracking.poll_timestamp,
             })
             .ok();
 
