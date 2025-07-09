@@ -2,7 +2,7 @@
 
 # ALVR - Air Light VR
 
-* This is a **Fork** ALVR for experiments on linux, backport to Ubuntu 20.04 and custom build with latest ffmpeg and Vulkan
+* This is a **Fork** ALVR for experiments on linux, custom build with latest ffmpeg, Vulkan and other minor changes.
 * **Bugs from this fork should be reported** [**here**](https://github.com/Mr-Precise/ALVR-temp/issues), not to the original author.
 * Original author [**alvr-org/ALVR**](https://github.com/alvr-org/ALVR)  
 
@@ -12,7 +12,7 @@ Stream VR games from your PC to your headset via Wi-Fi.
 This is a fork of [ALVR](https://github.com/polygraphene/ALVR).
 
 ### Direct download to the latest version:
-### [Windows Launcher](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_launcher_windows.zip) | [Linux Launcher](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_launcher_linux.tar.gz)
+### [Windows Streamer](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_streamer_windows.zip) | [Linux Streamer](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_streamer_linux.tar.gz) | [Client .apk](https://github.com/Mr-Precise/ALVR-temp/releases/latest/download/alvr_client_android.apk)
 
 ## Compatibility
 
@@ -33,9 +33,9 @@ This is a fork of [ALVR](https://github.com/polygraphene/ALVR).
 
 |     PC OS      |                                    Support                                    |
 | :------------: | :---------------------------------------------------------------------------: |
-| Windows 10/11  | :heavy_check_mark: ([store link](https://store.steampowered.com/app/3312710)) |
+| Windows 10/11  | :heavy_check_mark: |
 | Windows XP/7/8 |                                      :x:                                      |
-|     Linux      |                             :heavy_check_mark:***                             |
+|     Linux      |                             :heavy_check_mark:                             |
 |     macOS      |                                      :x:                                      |
 
 \*** : Please check the wiki for compatibility info
@@ -48,7 +48,7 @@ This is a fork of [ALVR](https://github.com/polygraphene/ALVR).
 
 -   High-end gaming PC
     -   See OS compatibility table above.
-    -   NVIDIA GPU that supports NVENC (1000 GTX Series or higher) (or with an AMD GPU that supports AMF VCE) with the latest driver.
+    -   NVIDIA GPU that supports NVENC (970 GTX Series or higher) (or with an AMD GPU that supports AMF VCE) with the latest driver.
     -   Laptops with an onboard (Intel HD, AMD iGPU) and an additional dedicated GPU (NVidia GTX/RTX, AMD HD/R5/R7): you should assign the dedicated GPU or "high performance graphics adapter" to the applications ALVR, SteamVR for best performance and compatibility. (NVidia: Nvidia control panel->3d settings->application settings; AMD: similiar way)
 
 -   802.11ac 5Ghz wireless or ethernet wired connection
