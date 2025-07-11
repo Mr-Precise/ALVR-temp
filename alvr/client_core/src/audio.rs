@@ -11,7 +11,7 @@ use ndk::audio::{
 };
 use std::{
     collections::VecDeque,
-    mem, slice,
+    slice,
     sync::{Arc, mpsc},
     time::Duration,
 };
@@ -19,7 +19,7 @@ use std::{
 const INPUT_SAMPLES_MAX_BUFFER_COUNT: usize = 20;
 const INPUT_RECV_TIMEOUT: Duration = Duration::from_millis(20);
 
-extern "C" {
+unsafe extern "C" {
     fn alvr_create_input_stream_unprocessed(sample_rate: i32, channel_count: i32) -> *mut std::ffi::c_void;
     fn alvr_read_input_samples(
         stream: *mut std::ffi::c_void,
@@ -50,40 +50,29 @@ pub fn record_audio_blocking(
         mpsc::sync_channel::<Vec<u8>>(INPUT_SAMPLES_MAX_BUFFER_COUNT);
 
     let stream_ptr = unsafe { alvr_create_input_stream_unprocessed(sample_rate as i32, 1) };
-if stream_ptr.is_null() {
-    bail!("Failed to create input stream with unprocessed preset");
-}
-
-let frame_size = std::mem::size_of::<i16>();
-let frames_per_buffer = 256;
-let timeout_us = 20_000;
-
-while is_running() {
-    let mut buf = vec![0i16; frames_per_buffer];
-    let read = unsafe {
-        alvr_read_input_samples(
-            stream_ptr,
-            buf.as_mut_ptr(),
-            frames_per_buffer as i32,
-            timeout_us,
-        )
-    };
-
-    if read > 0 {
-        let sample_buffer = bytemuck::cast_slice(&buf[..read as usize]).to_vec();
-        samples_sender.send(sample_buffer).ok();
-    }
-}
-
-    // If configuration changed, the stream must be restarted
-    if stream.channel_count() != 1
-        || stream.sample_rate() != sample_rate as i32
-        || stream.format() != AudioFormat::PCM_I16
-    {
-        bail!("Invalid audio configuration");
+    if stream_ptr.is_null() {
+        bail!("Failed to create input stream with unprocessed preset");
     }
 
-    stream.request_start()?;
+    let frames_per_buffer = 256;
+    let timeout_us = 20_000;
+
+    while is_running() {
+        let mut buf = vec![0i16; frames_per_buffer];
+        let read = unsafe {
+            alvr_read_input_samples(
+                stream_ptr,
+                buf.as_mut_ptr(),
+                frames_per_buffer as i32,
+                timeout_us,
+            )
+        };
+
+        if read > 0 {
+            let sample_buffer = bytemuck::cast_slice(&buf[..read as usize]).to_vec();
+            samples_sender.send(sample_buffer).ok();
+        }
+    }
 
     while is_running() && error.lock().is_none() {
         while let Ok(sample_buffer) = samples_receiver.recv_timeout(INPUT_RECV_TIMEOUT) {
@@ -94,9 +83,6 @@ while is_running() {
             sender.send(buffer).ok();
         }
     }
-
-    // Note: request_stop() is asynchronous, and must be called always, even on error
-    stream.request_stop()?;
 
     if let Some(e) = *error.lock() {
         return Err(e.into());
@@ -116,8 +102,6 @@ pub fn play_audio_loop(
 ) -> Result<()> {
     assert_eq!(channels_count, 2, "This code only supports stereo output");
 
-    // the client sends invalid sample rates sometimes, and we crash if we try and use one
-    // (batch_frames_count ends up zero and the audio callback gets confused)
     if sample_rate < 8000 {
         bail!("Invalid audio sample rate");
     }
@@ -149,7 +133,6 @@ pub fn play_audio_loop(
                 );
 
                 let out_frames = unsafe {
-                    // 2 channels
                     slice::from_raw_parts_mut(data_ptr as *mut f32, frames_count as usize * 2)
                 };
                 out_frames.copy_from_slice(&samples);
@@ -163,7 +146,6 @@ pub fn play_audio_loop(
         })
         .open_stream()?;
 
-    // If configuration changed, the stream must be restarted
     if stream.channel_count() != 2
         || stream.sample_rate() != sample_rate as i32
         || stream.format() != AudioFormat::PCM_Float
@@ -184,7 +166,6 @@ pub fn play_audio_loop(
     )
     .ok();
 
-    // Note: request_stop() is asynchronous, and must be called always, even on error
     stream.request_stop()?;
 
     if let Some(e) = *error.lock() {
