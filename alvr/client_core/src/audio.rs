@@ -19,6 +19,16 @@ use std::{
 const INPUT_SAMPLES_MAX_BUFFER_COUNT: usize = 20;
 const INPUT_RECV_TIMEOUT: Duration = Duration::from_millis(20);
 
+extern "C" {
+    fn alvr_create_input_stream_unprocessed(sample_rate: i32, channel_count: i32) -> *mut std::ffi::c_void;
+    fn alvr_read_input_samples(
+        stream: *mut std::ffi::c_void,
+        buffer: *mut i16,
+        frames: i32,
+        timeout_us: i64,
+    ) -> i32;
+}
+
 #[allow(unused_variables)]
 pub fn record_audio_blocking(
     is_running: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -39,29 +49,31 @@ pub fn record_audio_blocking(
     let (samples_sender, samples_receiver) =
         mpsc::sync_channel::<Vec<u8>>(INPUT_SAMPLES_MAX_BUFFER_COUNT);
 
-    let stream = AudioStreamBuilder::new()?
-        .direction(AudioDirection::Input)
-        .channel_count(1)
-        .sample_rate(sample_rate as _)
-        .format(AudioFormat::PCM_I16)
-        .performance_mode(AudioPerformanceMode::LowLatency)
-        .sharing_mode(AudioSharingMode::Shared)
-        .data_callback(Box::new(move |_, data_ptr, frames_count| {
-            let buffer_size = frames_count as usize * mem::size_of::<i16>();
+    let stream_ptr = unsafe { alvr_create_input_stream_unprocessed(sample_rate as i32, 1) };
+if stream_ptr.is_null() {
+    bail!("Failed to create input stream with unprocessed preset");
+}
 
-            let sample_buffer =
-                unsafe { slice::from_raw_parts(data_ptr as *mut u8, buffer_size) }.to_vec();
+let frame_size = std::mem::size_of::<i16>();
+let frames_per_buffer = 256;
+let timeout_us = 20_000;
 
-            // it will block only when the channel is full
-            samples_sender.send(sample_buffer).ok();
+while is_running() {
+    let mut buf = vec![0i16; frames_per_buffer];
+    let read = unsafe {
+        alvr_read_input_samples(
+            stream_ptr,
+            buf.as_mut_ptr(),
+            frames_per_buffer as i32,
+            timeout_us,
+        )
+    };
 
-            AudioCallbackResult::Continue
-        }))
-        .error_callback({
-            let error = Arc::clone(&error);
-            Box::new(move |_, e| *error.lock() = Some(e.into()))
-        })
-        .open_stream()?;
+    if read > 0 {
+        let sample_buffer = bytemuck::cast_slice(&buf[..read as usize]).to_vec();
+        samples_sender.send(sample_buffer).ok();
+    }
+}
 
     // If configuration changed, the stream must be restarted
     if stream.channel_count() != 1

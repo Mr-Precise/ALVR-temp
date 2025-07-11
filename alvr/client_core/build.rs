@@ -9,5 +9,9 @@ fn main() {
 
         #[cfg(feature = "link-stdcpp-shared")]
         println!("cargo:rustc-link-lib=c++_shared");
+
+        cc::Build::new()
+            .file("android/src/main/cpp/native_audio.c")
+            .compile("native_audio");
     }
 }
